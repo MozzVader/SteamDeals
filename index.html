@@ -31,20 +31,22 @@
         .original-price { text-decoration: line-through; color: #626366; font-size: 1rem; }
         .lowest { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
         .chart-container { flex: 1; min-width: 300px; height: 150px; }
-        #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 20px; font-size: 1.1rem; }
-        .loader {
-            border: 4px solid #2a475e; border-top: 4px solid #66c0f4;
-            border-radius: 50%; width: 30px; height: 30px;
-            animation: spin 1s linear infinite; margin: 20px auto;
+        #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 10px; font-size: 1.1rem; }
+        .progress-container {
+            width: 80%; background-color: #2a475e; border-radius: 10px;
+            margin: 0 auto 20px auto; overflow: hidden;
         }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .progress-bar {
+            height: 20px; background-color: #a4d007; width: 0%;
+            transition: width 0.3s ease; text-align: center; font-size: 12px; line-height: 20px; color: black; font-weight: bold;
+        }
     </style>
 </head>
 <body>
 
     <div class="header">
         <h1>🎮 Mi Wishlist en Oferta</h1>
-        <p>El servidor busca por ti. Solo introduce tus datos.</p>
+        <p>Introduce tus datos para buscar ofertas sin bloqueos.</p>
         <input type="text" id="steamIdInput" value="76561198043893385" placeholder="Tu Steam64 ID">
         <input type="text" id="apiKeyInput" placeholder="Tu Steam Web API Key">
         <br><br>
@@ -52,18 +54,30 @@
     </div>
     
     <div id="status"></div>
-    <div id="loader" class="loader" style="display: none;"></div>
+    <div class="progress-container" id="progress-container" style="display: none;">
+        <div class="progress-bar" id="progress-bar">0%</div>
+    </div>
     <div id="results"></div>
 
     <script>
         const WORKER_URL = "https://steamdeals.mozz05.workers.dev/"; 
         
+        // Función para dividir arrays en lotes (chunks)
+        function chunkArray(array, size) {
+            const result = [];
+            for (let i = 0; i < array.length; i += size) {
+                result.push(array.slice(i, i + size));
+            }
+            return result;
+        }
+
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
             const resultsDiv = document.getElementById('results');
             const statusDiv = document.getElementById('status');
-            const loaderDiv = document.getElementById('loader');
+            const progressBar = document.getElementById('progress-bar');
+            const progressContainer = document.getElementById('progress-container');
             
             if (!steamId || !apiKey) {
                 statusDiv.innerText = "⚠️ Por favor, introduce tu Steam ID y tu API Key.";
@@ -71,70 +85,84 @@
             }
 
             resultsDiv.innerHTML = '';
-            loaderDiv.style.display = 'block';
-            statusDiv.innerText = 'El servidor está buscando ofertas en tu wishlist. Esto puede tardar unos segundos...';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.innerText = '0%';
+            statusDiv.innerText = 'Obteniendo tu wishlist de Steam...';
 
             try {
-                const fetchUrl = `${WORKER_URL}?steamid=${steamId}&apikey=${apiKey}`;
-                const response = await fetch(fetchUrl);
+                // 1. Obtenemos la lista completa de IDs
+                const wishlistUrl = `${WORKER_URL}?mode=wishlist&steamid=${steamId}&apikey=${apiKey}`;
+                const wishlistRes = await fetch(wishlistUrl);
                 
-                if (!response.ok) throw new Error("Error en el servidor Worker.");
-
-                const data = await response.json();
+                if (!wishlistRes.ok) throw new Error("Error obteniendo la wishlist.");
                 
-                // Si el Worker devolvió un error grave (ej. API Key mala)
-                if (data.error) throw new Error(data.error);
-
-                loaderDiv.style.display = 'none';
-
-                const deals = data.deals;
-                const blocked = data.blocked;
-                const total = data.total;
-
-                if (deals.length === 0 && blocked === 0) {
-                    statusDiv.innerText = '❌ Ningún juego de tu wishlist está en oferta ahora mismo.';
+                const appIds = await wishlistRes.json();
+                
+                if (appIds.length === 0) {
+                    statusDiv.innerText = "Wishlist vacía o perfil privado.";
+                    progressContainer.style.display = 'none';
                     return;
                 }
 
-                // Mostramos el resultado principal
-                let statusMessage = `✅ Encontrados ${deals.length} juegos en oferta de ${total} analizados.`;
-                
-                // SI HUBO BLOQUEOS, TE LO DECIMOS CLARAMENTE
-                if (blocked > 0) {
-                    statusMessage += ` ⚠️ (CheapShark bloqueó ${blocked} peticiones. Faltan juegos por verificar).`;
+                statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en lotes...`;
+
+                // 2. Dividimos en lotes de 20 juegos para no saturar Cloudflare
+                const lotes = chunkArray(appIds, 20);
+                let totalDeals = 0;
+
+                for (let i = 0; i < lotes.length; i++) {
+                    const lote = lotes[i];
+                    const porcentaje = Math.round(((i + 1) / lotes.length) * 100);
+                    progressBar.style.width = porcentaje + '%';
+                    progressBar.innerText = porcentaje + '%';
+                    statusDiv.innerText = `Analizando lote ${i + 1} de ${lotes.length}...`;
+
+                    // 3. Pedimos las ofertas al Worker para este lote
+                    const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lote.join(',')}`;
+                    const dealsRes = await fetch(dealsUrl);
+                    
+                    if (dealsRes.ok) {
+                        const deals = await dealsRes.json();
+                        
+                        // 4. Pintamos los resultados de este lote
+                        deals.forEach(deal => {
+                            totalDeals++;
+                            const isLowest = parseFloat(deal.steamPrice) <= parseFloat(deal.lowestEver);
+
+                            const card = document.createElement('div');
+                            card.className = 'card';
+                            card.innerHTML = `
+                                <div class="game-info">
+                                    <div class="game-title">${deal.name}</div>
+                                    <span class="original-price">$${deal.originalPrice}</span>
+                                    <span class="price-tag">$${deal.steamPrice}</span>
+                                    <span>(-${deal.discount}%)</span>
+                                    <div class="lowest">
+                                        Mínimo histórico: $${deal.lowestEver} 
+                                        ${isLowest ? '⭐ ¡ES EL MÍNIMO HISTÓRICO!' : ''}
+                                    </div>
+                                </div>
+                                <div class="chart-container">
+                                    <canvas id="chart-${deal.appId}"></canvas>
+                                </div>
+                            `;
+                            resultsDiv.appendChild(card);
+
+                            createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEver, deal.originalPrice);
+                        });
+                    }
+                    
+                    // Pausa entre lotes para no saturar
+                    if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
                 }
-                statusDiv.innerText = statusMessage;
 
-                // Pintamos los resultados
-                deals.forEach(deal => {
-                    const isLowest = parseFloat(deal.steamPrice) <= parseFloat(deal.lowestEver);
-
-                    const card = document.createElement('div');
-                    card.className = 'card';
-                    card.innerHTML = `
-                        <div class="game-info">
-                            <div class="game-title">${deal.name}</div>
-                            <span class="original-price">$${deal.originalPrice}</span>
-                            <span class="price-tag">$${deal.steamPrice}</span>
-                            <span>(-${deal.discount}%)</span>
-                            <div class="lowest">
-                                Mínimo histórico: $${deal.lowestEver} 
-                                ${isLowest ? '⭐ ¡ES EL MÍNIMO HISTÓRICO!' : ''}
-                            </div>
-                        </div>
-                        <div class="chart-container">
-                            <canvas id="chart-${deal.appId}"></canvas>
-                        </div>
-                    `;
-                    resultsDiv.appendChild(card);
-
-                    createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEver, deal.originalPrice);
-                });
+                statusDiv.innerText = totalDeals > 0 ? `✅ Búsqueda completada. Encontrados ${totalDeals} juegos en oferta.` : '❌ Búsqueda completada. Ningún juego está en oferta ahora mismo.';
 
             } catch (error) {
-                loaderDiv.style.display = 'none';
                 statusDiv.innerHTML = `<span style="color: #ff0000;">Error: ${error.message}</span>`;
                 console.error(error);
+                progressContainer.style.display = 'none';
             }
         }
 
