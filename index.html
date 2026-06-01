@@ -12,14 +12,15 @@
         }
         .header { text-align: center; margin-bottom: 30px; }
         input {
-            padding: 10px; width: 250px; border-radius: 5px;
-            border: none; background: #2a475e; color: white; font-size: 16px; margin: 5px;
+            padding: 10px; width: 300px; border-radius: 5px;
+            border: none; background: #2a475e; color: white; font-size: 14px; margin: 5px;
         }
         button {
             padding: 10px 20px; border-radius: 5px; border: none;
             background: #66c0f4; color: #1b2838; font-weight: bold; cursor: pointer; font-size: 16px;
         }
         button:hover { background: #a4d007; }
+        a { color: #a4d007; }
         .card {
             background: #2a475e; border-radius: 8px; padding: 15px;
             margin-bottom: 20px; display: flex; gap: 20px; align-items: center;
@@ -37,9 +38,9 @@
 
     <div class="header">
         <h1>🎮 Mi Wishlist en Oferta</h1>
-        <p>Introduce tu ID numérico o tu Vanity URL (ej: Mozz_Vader)</p>
-        <input type="text" id="vanityInput" placeholder="Vanity URL (ej: Mozz_Vader)">
-        <input type="text" id="steamIdInput" placeholder="O tu Steam64 ID">
+        <p>Necesitamos tu ID y tu <a href="https://steamcommunity.com/dev/apikey" target="_blank">API Key de Steam</a> (es gratis).</p>
+        <input type="text" id="steamIdInput" value="76561198043893385" placeholder="Tu Steam64 ID">
+        <input type="text" id="apiKeyInput" placeholder="Pega tu Steam Web API Key aquí">
         <br><br>
         <button onclick="startTracking()">Buscar Ofertas</button>
     </div>
@@ -52,87 +53,80 @@
         const WORKER_URL = "https://steamdeals.mozz05.workers.dev/"; 
         
         async function startTracking() {
-            const vanity = document.getElementById('vanityInput').value;
             const steamId = document.getElementById('steamIdInput').value;
+            const apiKey = document.getElementById('apiKeyInput').value;
             const resultsDiv = document.getElementById('results');
             const statusDiv = document.getElementById('status');
             
-            if (!vanity && !steamId) {
-                statusDiv.innerText = "⚠️ Por favor, introduce tu Vanity URL o tu ID.";
+            if (!steamId || !apiKey) {
+                statusDiv.innerText = "⚠️ Por favor, introduce tu Steam ID y tu API Key.";
                 return;
             }
 
             resultsDiv.innerHTML = '';
-            statusDiv.innerText = 'Conectando con Steam mediante el Worker...';
+            statusDiv.innerText = 'Conectando con la API Oficial de Steam...';
 
             try {
-                // Construimos la URL del worker dependiendo de qué puso el usuario
-                let fetchUrl = WORKER_URL;
-                if (vanity) {
-                    fetchUrl += `?vanity=${vanity}`;
-                } else {
-                    fetchUrl += `?steamid=${steamId}`;
-                }
-
+                // Llamamos a nuestro Worker que usa la API oficial
+                const fetchUrl = `${WORKER_URL}?steamid=${steamId}&apikey=${apiKey}`;
                 const response = await fetch(fetchUrl);
                 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText);
+                if (!response.ok) throw new Error("Error en el Worker.");
+
+                const appIds = await response.json();
+
+                if (!appIds || appIds.length === 0) {
+                    throw new Error("Wishlist vacía o la API Key no tiene permisos sobre este perfil.");
                 }
 
-                const wishlistData = await response.json();
-
-                if (!wishlistData || Object.keys(wishlistData).length === 0) {
-                    throw new Error("Wishlist vacía o perfil privado.");
-                }
-
-                statusDiv.innerText = `Wishlist cargada. Buscando descuentos...`;
+                statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando descuentos...`;
                 let dealsFound = 0;
 
-                for (const appId in wishlistData) {
-                    const game = wishlistData[appId];
-                    const subs = game.subs;
-
-                    if (subs && subs.length > 0 && subs[0].discount_pct > 0) {
-                        dealsFound++;
-                        const steamPrice = (subs[0].price / 100).toFixed(2);
-                        const originalPrice = (subs[0].price / (1 - subs[0].discount_pct/100)).toFixed(2);
-
-                        statusDiv.innerText = `Analizando: ${game.name}...`;
-
-                        const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
+                for (const appId of appIds) {
+                    const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
+                    
+                    try {
                         const csResponse = await fetch(cheapSharkUrl);
                         const csData = await csResponse.json();
 
-                        let lowestEver = steamPrice; 
-                        if (csData.length > 0) {
-                            lowestEver = parseFloat(csData[0].lowestPrice).toFixed(2);
-                        }
-                        
-                        const isLowest = parseFloat(steamPrice) <= parseFloat(lowestEver);
+                        // Si CheapShark tiene datos y está en descuento
+                        if (csData.length > 0 && parseFloat(csData[0].savings) > 0) {
+                            const deal = csData[0];
+                            dealsFound++;
+                            
+                            const name = deal.title;
+                            const steamPrice = parseFloat(deal.salePrice).toFixed(2);
+                            const originalPrice = parseFloat(deal.normalPrice).toFixed(2);
+                            const lowestEver = parseFloat(deal.lowestPrice).toFixed(2);
+                            const discount = Math.round(parseFloat(deal.savings));
+                            const isLowest = parseFloat(steamPrice) <= parseFloat(lowestEver);
 
-                        const card = document.createElement('div');
-                        card.className = 'card';
-                        card.innerHTML = `
-                            <div class="game-info">
-                                <div class="game-title">${game.name}</div>
-                                <span class="original-price">$${originalPrice}</span>
-                                <span class="price-tag">$${steamPrice}</span>
-                                <span>(-${subs[0].discount_pct}%)</span>
-                                <div class="lowest">
-                                    Mínimo histórico: $${lowestEver} 
-                                    ${isLowest ? '⭐ ¡ES EL MÍNIMO HISTÓRICO!' : ''}
+                            statusDiv.innerText = `Analizando: ${name}...`;
+
+                            const card = document.createElement('div');
+                            card.className = 'card';
+                            card.innerHTML = `
+                                <div class="game-info">
+                                    <div class="game-title">${name}</div>
+                                    <span class="original-price">$${originalPrice}</span>
+                                    <span class="price-tag">$${steamPrice}</span>
+                                    <span>(-${discount}%)</span>
+                                    <div class="lowest">
+                                        Mínimo histórico: $${lowestEver} 
+                                        ${isLowest ? '⭐ ¡ES EL MÍNIMO HISTÓRICO!' : ''}
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="chart-container">
-                                <canvas id="chart-${appId}"></canvas>
-                            </div>
-                        `;
-                        resultsDiv.appendChild(card);
+                                <div class="chart-container">
+                                    <canvas id="chart-${appId}"></canvas>
+                                </div>
+                            `;
+                            resultsDiv.appendChild(card);
 
-                        createTimelineChart(appId, game.name, steamPrice, lowestEver, originalPrice);
-                        await new Promise(r => setTimeout(r, 300));
+                            createTimelineChart(appId, name, steamPrice, lowestEver, originalPrice);
+                            await new Promise(r => setTimeout(r, 300));
+                        }
+                    } catch (err) {
+                        console.error("Error con el juego ID " + appId, err);
                     }
                 }
                 
