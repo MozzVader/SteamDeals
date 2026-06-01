@@ -13,15 +13,18 @@
             padding: 20px;
         }
         .header { text-align: center; margin-bottom: 30px; }
-        input {
-            padding: 10px; width: 300px; border-radius: 5px;
-            border: none; background: #2a475e; color: white; font-size: 16px;
+        input, textarea {
+            padding: 10px; width: 80%; border-radius: 5px;
+            border: none; background: #2a475e; color: white; font-size: 14px;
+            margin-bottom: 10px;
         }
+        textarea { height: 100px; resize: vertical; }
         button {
             padding: 10px 20px; border-radius: 5px; border: none;
             background: #66c0f4; color: #1b2838; font-weight: bold; cursor: pointer; font-size: 16px;
         }
         button:hover { background: #a4d007; }
+        a { color: #a4d007; }
         .card {
             background: #2a475e; border-radius: 8px; padding: 15px;
             margin-bottom: 20px; display: flex; gap: 20px; align-items: center;
@@ -33,78 +36,88 @@
         .lowest { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
         .chart-container { flex: 1; min-width: 300px; height: 150px; }
         #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 20px; font-size: 1.1rem; }
+        .instructions { background: #2a475e; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: left; max-width: 800px; margin-left: auto; margin-right: auto; }
     </style>
 </head>
 <body>
 
     <div class="header">
         <h1>🎮 Mi Wishlist en Oferta</h1>
-        <input type="text" id="steamId" value="76561198043893385" placeholder="Pega tu Steam64 ID aquí">
-        <button onclick="startTracking()">Buscar Ofertas</button>
+        
+        <div class="instructions">
+            <p><strong>Steam bloquea las peticiones automáticas. Sigue estos 2 pasos simples:</strong></p>
+            <ol>
+                <li>Haz clic en este enlace para ver tu Wishlist en texto: 
+                    <a href="https://store.steampowered.com/wishlist/profiles/76561198043893385/wishlistdata/" target="_blank">Abrir mi Wishlist</a> 
+                    (Copia TODO el texto que aparece)</li>
+                <li>Pégalo en la caja de abajo y dale a "Analizar Ofertas"</li>
+            </ol>
+        </div>
+
+        <textarea id="wishlistData" placeholder="Pega aquí el código/JSON de tu wishlist..."></textarea>
+        <br>
+        <button onclick="startTracking()">Analizar Ofertas</button>
     </div>
     
-    <div id="status">Pulsa el botón para buscar</div>
+    <div id="status"></div>
     <div id="results"></div>
 
     <script>
-        // PEGA AQUÍ LA URL DE TU WORKER (DEBE TERMINAR EN ?steamid=)
-        const MY_WORKER_URL = "https://steamdeals.mozz05.workers.dev/?steamid="; 
-        
         async function startTracking() {
-            const steamId = document.getElementById('steamId').value;
+            const rawData = document.getElementById('wishlistData').value;
             const resultsDiv = document.getElementById('results');
             const statusDiv = document.getElementById('status');
             
+            if (!rawData) {
+                statusDiv.innerText = "⚠️ Por favor, pega los datos de tu wishlist.";
+                return;
+            }
+
+            let wishlistData;
+            try {
+                wishlistData = JSON.parse(rawData);
+            } catch (e) {
+                statusDiv.innerHTML = '<span style="color: #ff0000;">El texto pegado no es un JSON válido. Asegúrate de copiar todo el contenido del enlace.</span>';
+                return;
+            }
+
             resultsDiv.innerHTML = '';
-            statusDiv.innerText = 'Leyendo tu Wishlist desde la Comunidad de Steam...';
+            statusDiv.innerText = 'Procesando wishlist... Buscando descuentos.';
+            let dealsFound = 0;
 
             try {
-                // 1. Obtenemos los IDs de la wishlist desde el Worker
-                const fetchUrl = MY_WORKER_URL + steamId;
-                const response = await fetch(fetchUrl);
-                
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText);
-                }
+                for (const appId in wishlistData) {
+                    const game = wishlistData[appId];
+                    const subs = game.subs;
 
-                const appIds = await response.json();
-
-                if (!appIds || appIds.length === 0) {
-                    throw new Error("No se encontraron juegos o el perfil es privado.");
-                }
-
-                statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando cuáles están en oferta...`;
-                let dealsFound = 0;
-
-                // 2. Revisamos cada juego en CheapShark
-                for (const appId of appIds) {
-                    const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
-                    const csResponse = await fetch(cheapSharkUrl);
-                    const csData = await csResponse.json();
-
-                    // Si CheapShark tiene datos y el juego está en descuento
-                    if (csData.length > 0 && parseInt(csData[0].savings) > 0) {
-                        const deal = csData[0];
+                    // Solo nos interesan los que tienen descuento
+                    if (subs && subs.length > 0 && subs[0].discount_pct > 0) {
                         dealsFound++;
-                        
-                        const name = deal.title;
-                        const steamPrice = parseFloat(deal.salePrice).toFixed(2);
-                        const originalPrice = parseFloat(deal.normalPrice).toFixed(2);
-                        const lowestEver = parseFloat(deal.lowestPrice).toFixed(2);
-                        const discount = Math.round(parseFloat(deal.savings));
-                        const isLowest = parseFloat(steamPrice) <= parseFloat(lowestEver);
+                        const steamPrice = (subs[0].price / 100).toFixed(2);
+                        const originalPrice = (subs[0].price / (1 - subs[0].discount_pct/100)).toFixed(2);
 
-                        statusDiv.innerText = `Analizando: ${name}...`;
+                        statusDiv.innerText = `Analizando: ${game.name}...`;
+
+                        // Buscamos mínimo histórico en CheapShark
+                        const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
+                        const csResponse = await fetch(cheapSharkUrl);
+                        const csData = await csResponse.json();
+
+                        let lowestEver = steamPrice; 
+                        if (csData.length > 0) {
+                            lowestEver = parseFloat(csData[0].lowestPrice).toFixed(2);
+                        }
+                        
+                        const isLowest = parseFloat(steamPrice) <= parseFloat(lowestEver);
 
                         const card = document.createElement('div');
                         card.className = 'card';
                         card.innerHTML = `
                             <div class="game-info">
-                                <div class="game-title">${name}</div>
+                                <div class="game-title">${game.name}</div>
                                 <span class="original-price">$${originalPrice}</span>
                                 <span class="price-tag">$${steamPrice}</span>
-                                <span>(-${discount}%)</span>
+                                <span>(-${subs[0].discount_pct}%)</span>
                                 <div class="lowest">
                                     Mínimo histórico: $${lowestEver} 
                                     ${isLowest ? '⭐ ¡ES EL MÍNIMO HISTÓRICO!' : ''}
@@ -116,16 +129,16 @@
                         `;
                         resultsDiv.appendChild(card);
 
-                        createTimelineChart(appId, name, steamPrice, lowestEver, originalPrice);
+                        createTimelineChart(appId, game.name, steamPrice, lowestEver, originalPrice);
                         
-                        await new Promise(r => setTimeout(r, 300));
+                        await new Promise(r => setTimeout(r, 300)); // Pausa para no saturar
                     }
                 }
                 
                 statusDiv.innerText = dealsFound > 0 ? `✅ Se encontraron ${dealsFound} juegos en oferta.` : '❌ Ningún juego de tu wishlist está en oferta ahora mismo.';
 
             } catch (error) {
-                statusDiv.innerHTML = `<span style="color: #ff0000;">Error: ${error.message}</span>`;
+                statusDiv.innerHTML = `<span style="color: #ff0000;">Error inesperado: ${error.message}</span>`;
                 console.error(error);
             }
         }
