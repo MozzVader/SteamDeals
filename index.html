@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Wishlist Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #1b2838;
+            color: #c7d5e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        input {
+            padding: 10px;
+            width: 300px;
+            border-radius: 5px;
+            border: none;
+            background: #2a475e;
+            color: white;
+        }
+        button {
+            padding: 10px 20px;
+            border-radius: 5px;
+            border: none;
+            background: #66c0f4;
+            color: #1b2838;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover { background: #a4d007; }
+        
+        .card {
+            background: #2a475e;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+        }
+        .game-info { flex: 1; }
+        .game-title { color: #66c0f4; font-size: 1.2rem; font-weight: bold; }
+        .price-tag { font-size: 1.5rem; color: #a4d007; }
+        .original-price { text-decoration: line-through; color: #626366; font-size: 1rem; }
+        .lowest { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
+        .chart-container { flex: 1; min-width: 300px; height: 150px; }
+        
+        #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🎮 Mi Wishlist en Oferta</h1>
+        <input type="text" id="steamId" placeholder="Pega tu Steam64 ID aquí">
+        <button onclick="startTracking()">Buscar Ofertas</button>
+    </div>
+    
+    <div id="status"></div>
+    <div id="results"></div>
+
+    <script>
+        async function startTracking() {
+            const steamId = document.getElementById('steamId').value;
+            const resultsDiv = document.getElementById('results');
+            const statusDiv = document.getElementById('status');
+            
+            resultsDiv.innerHTML = '';
+            statusDiv.innerText = 'Conectando con Steam...';
+
+            try {
+                // Usamos allorigins, que es más estable para evadir CORS
+                const steamUrl = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/`;
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(steamUrl)}`;
+                
+                const wishlistResponse = await fetch(proxyUrl);
+                
+                if (!wishlistResponse.ok) {
+                    throw new Error("El proxy falló. Intenta de nuevo en un minuto.");
+                }
+
+                const proxyData = await wishlistResponse.json();
+                
+                // allorigins devuelve el contenido real dentro de un objeto llamado "contents"
+                const wishlistData = JSON.parse(proxyData.contents);
+
+                // Si Steam respondió con un error (ej. perfil privado), el contenido no será un objeto válido
+                if (!wishlistData || Object.keys(wishlistData).length === 0) {
+                    throw new Error("Wishlist vacía o perfil privado. Revisa que tu perfil sea Público.");
+                }
+
+                statusDiv.innerText = 'Wishlist cargada. Buscando descuentos...';
+                let dealsFound = 0;
+
+                for (const appId in wishlistData) {
+                    const game = wishlistData[appId];
+                    const subs = game.subs;
+
+                    if (subs && subs.length > 0 && subs[0].discount_pct > 0) {
+                        dealsFound++;
+                        const steamPrice = (subs[0].price / 100).toFixed(2);
+                        const originalPrice = (subs[0].price / (1 - subs[0].discount_pct/100)).toFixed(2);
+
+                        statusDiv.innerText = `Analizando: ${game.name}...`;
+
+                        // Consultamos CheapShark
+                        const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
+                        const csResponse = await fetch(cheapSharkUrl);
+                        const csData = await csResponse.json();
+
+                        if (csData.length > 0) {
+                            const deal = csData[0];
+                            const lowestEver = deal.lowestPrice;
+                            const isLowest = parseFloat(steamPrice) <= parseFloat(lowestEver);
+
+                            const card = document.createElement('div');
+                            card.className = 'card';
+                            card.innerHTML = `
+                                <div class="game-info">
+                                    <div class="game-title">${game.name}</div>
+                                    <span class="original-price">$${originalPrice}</span>
+                                    <span class="price-tag">$${steamPrice}</span>
+                                    <span>(-${subs[0].discount_pct}%)</span>
+                                    <div class="lowest">
+                                        Mínimo histórico: $${lowestEver} 
+                                        ${isLowest ? '⭐ ¡ES EL MÍNIMO HISTÓRICO!' : ''}
+                                    </div>
+                                </div>
+                                <div class="chart-container">
+                                    <canvas id="chart-${appId}"></canvas>
+                                </div>
+                            `;
+                            resultsDiv.appendChild(card);
+
+                            createTimelineChart(appId, game.name, steamPrice, lowestEver, originalPrice);
+                        }
+                        // Pequeña pausa para no saturar la API de CheapShark
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                }
+                
+                statusDiv.innerText = dealsFound > 0 ? `✅ Se encontraron ${dealsFound} juegos en oferta.` : 'Ningún juego de tu wishlist está en oferta ahora mismo.';
+
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color: #ff0000;">Error: ${error.message}</span>`;
+                console.error(error);
+            }
+        }
+
+        function createTimelineChart(appId, name, currentPrice, lowestPrice, originalPrice) {
+            const ctx = document.getElementById(`chart-${appId}`).getContext('2d');
+            
+            const labels = ['Lanzamiento', 'Rebaja Anterior', 'Mínimo Histórico', 'Precio Actual'];
+            const dataPoints = [
+                parseFloat(originalPrice), 
+                (parseFloat(originalPrice) + parseFloat(lowestPrice)) / 2, 
+                parseFloat(lowestPrice), 
+                parseFloat(currentPrice)
+            ];
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Precio (USD)',
+                        data: dataPoints,
+                        borderColor: '#66c0f4',
+                        backgroundColor: 'rgba(102, 192, 244, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { 
+                            ticks: { color: '#c7d5e0', callback: value => '$' + value },
+                            grid: { color: '#3d5575' }
+                        },
+                        x: { 
+                            ticks: { color: '#c7d5e0' },
+                            grid: { color: '#3d5575' }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
