@@ -89,26 +89,23 @@
             statusDiv.innerText = 'Conectando con Steam mediante tu Worker...';
 
             try {
-                // Construimos la URL usando TU Worker
                 const steamUrl = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/`;
                 const fetchUrl = MY_WORKER_URL + encodeURIComponent(steamUrl);
                 
                 const wishlistResponse = await fetch(fetchUrl);
                 
-const wishlistResponse = await fetch(fetchUrl);
-                
-if (!wishlistResponse.ok) {
-    throw new Error("El Worker no pudo conectar con Steam. ¿Es público el perfil?");
-}
+                if (!wishlistResponse.ok) {
+                    throw new Error("El Worker no pudo conectar con Steam. ¿Es público el perfil?");
+                }
 
-// Verificamos que lo que nos llegó sea JSON antes de rompernos la cabeza
-const responseText = await wishlistResponse.text();
-let wishlistData;
-try {
-    wishlistData = JSON.parse(responseText);
-} catch (e) {
-    throw new Error("Steam bloqueó la petición o devolvió HTML. Intenta de nuevo en un rato.");
-}
+                const responseText = await wishlistResponse.text();
+                let wishlistData;
+                
+                try {
+                    wishlistData = JSON.parse(responseText);
+                } catch (e) {
+                    throw new Error("Steam devolvió HTML en vez de datos (te bloqueó). Prueba en unos minutos.");
+                }
 
                 if (!wishlistData || Object.keys(wishlistData).length === 0) {
                     throw new Error("Wishlist vacía o perfil privado. Revisa que tu perfil sea Público.");
@@ -121,7 +118,6 @@ try {
                     const game = wishlistData[appId];
                     const subs = game.subs;
 
-                    // Si tiene descuento en Steam ahora mismo
                     if (subs && subs.length > 0 && subs[0].discount_pct > 0) {
                         dealsFound++;
                         const steamPrice = (subs[0].price / 100).toFixed(2);
@@ -129,7 +125,6 @@ try {
 
                         statusDiv.innerText = `Analizando: ${game.name}...`;
 
-                        // Consultamos CheapShark para el mínimo histórico
                         const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
                         const csResponse = await fetch(cheapSharkUrl);
                         const csData = await csResponse.json();
@@ -160,7 +155,6 @@ try {
 
                             createTimelineChart(appId, game.name, steamPrice, lowestEver, originalPrice);
                         }
-                        // Pausa de 300ms para no saturar la API de CheapShark
                         await new Promise(r => setTimeout(r, 300));
                     }
                 }
