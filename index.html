@@ -95,11 +95,20 @@
                 
                 const wishlistResponse = await fetch(fetchUrl);
                 
-                if (!wishlistResponse.ok) {
-                    throw new Error("El Worker no pudo conectar con Steam. ¿Es público el perfil?");
-                }
+const wishlistResponse = await fetch(fetchUrl);
+                
+if (!wishlistResponse.ok) {
+    throw new Error("El Worker no pudo conectar con Steam. ¿Es público el perfil?");
+}
 
-                const wishlistData = await wishlistResponse.json();
+// Verificamos que lo que nos llegó sea JSON antes de rompernos la cabeza
+const responseText = await wishlistResponse.text();
+let wishlistData;
+try {
+    wishlistData = JSON.parse(responseText);
+} catch (e) {
+    throw new Error("Steam bloqueó la petición o devolvió HTML. Intenta de nuevo en un rato.");
+}
 
                 if (!wishlistData || Object.keys(wishlistData).length === 0) {
                     throw new Error("Wishlist vacía o perfil privado. Revisa que tu perfil sea Público.");
