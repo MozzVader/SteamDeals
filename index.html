@@ -74,6 +74,10 @@
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
+            
+            // Guardamos la API Key y el ID en la memoria del navegador para la próxima vez
+            if (apiKey) localStorage.setItem('steamApiKey', apiKey);
+            if (steamId) localStorage.setItem('steamId', steamId);
             const resultsDiv = document.getElementById('results');
             const statusDiv = document.getElementById('status');
             const progressBar = document.getElementById('progress-bar');
