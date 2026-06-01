@@ -1,95 +1,29 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Steam Wishlist Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {
-            background-color: #1b2838;
-            color: #c7d5e0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            padding: 20px;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        input {
-            padding: 10px;
-            width: 300px;
-            border-radius: 5px;
-            border: none;
-            background: #2a475e;
-            color: white;
-        }
-        button {
-            padding: 10px 20px;
-            border-radius: 5px;
-            border: none;
-            background: #66c0f4;
-            color: #1b2838;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        button:hover { background: #a4d007; }
+<script>
+        // PEGA AQUÍ LA URL DE TU WORKER DE CLOUDFLARE (la que copiaste en el paso 7)
+        const MY_WORKER_URL = "https://steamdeals.mozz05.workers.dev/?url="; 
         
-        .card {
-            background: #2a475e;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-            display: flex;
-            gap: 20px;
-        }
-        .game-info { flex: 1; }
-        .game-title { color: #66c0f4; font-size: 1.2rem; font-weight: bold; }
-        .price-tag { font-size: 1.5rem; color: #a4d007; }
-        .original-price { text-decoration: line-through; color: #626366; font-size: 1rem; }
-        .lowest { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
-        .chart-container { flex: 1; min-width: 300px; height: 150px; }
-        
-        #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 20px; }
-    </style>
-</head>
-<body>
-
-    <div class="header">
-        <h1>🎮 Mi Wishlist en Oferta</h1>
-        <input type="text" id="steamId" placeholder="Pega tu Steam64 ID aquí">
-        <button onclick="startTracking()">Buscar Ofertas</button>
-    </div>
-    
-    <div id="status"></div>
-    <div id="results"></div>
-
-    <script>
         async function startTracking() {
             const steamId = document.getElementById('steamId').value;
             const resultsDiv = document.getElementById('results');
             const statusDiv = document.getElementById('status');
             
             resultsDiv.innerHTML = '';
-            statusDiv.innerText = 'Conectando con Steam...';
+            statusDiv.innerText = 'Conectando con Steam mediante tu Worker...';
 
             try {
-                // Usamos allorigins, que es más estable para evadir CORS
+                // Construimos la URL usando TU Worker
                 const steamUrl = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/`;
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(steamUrl)}`;
+                const fetchUrl = MY_WORKER_URL + encodeURIComponent(steamUrl);
                 
-                const wishlistResponse = await fetch(proxyUrl);
+                const wishlistResponse = await fetch(fetchUrl);
                 
                 if (!wishlistResponse.ok) {
-                    throw new Error("El proxy falló. Intenta de nuevo en un minuto.");
+                    throw new Error("El Worker no pudo conectar con Steam. ¿Es público el perfil?");
                 }
 
-                const proxyData = await wishlistResponse.json();
-                
-                // allorigins devuelve el contenido real dentro de un objeto llamado "contents"
-                const wishlistData = JSON.parse(proxyData.contents);
+                // Como nuestro Worker ya devuelve el JSON limpio, no hay que hacer JSON.parse(contents)
+                const wishlistData = await wishlistResponse.json();
 
-                // Si Steam respondió con un error (ej. perfil privado), el contenido no será un objeto válido
                 if (!wishlistData || Object.keys(wishlistData).length === 0) {
                     throw new Error("Wishlist vacía o perfil privado. Revisa que tu perfil sea Público.");
                 }
@@ -108,7 +42,7 @@
 
                         statusDiv.innerText = `Analizando: ${game.name}...`;
 
-                        // Consultamos CheapShark
+                        // CheapShark sigue funcionando perfecto desde el frontend
                         const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
                         const csResponse = await fetch(cheapSharkUrl);
                         const csData = await csResponse.json();
@@ -139,7 +73,6 @@
 
                             createTimelineChart(appId, game.name, steamPrice, lowestEver, originalPrice);
                         }
-                        // Pequeña pausa para no saturar la API de CheapShark
                         await new Promise(r => setTimeout(r, 300));
                     }
                 }
@@ -194,5 +127,3 @@
             });
         }
     </script>
-</body>
-</html>
