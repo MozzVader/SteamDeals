@@ -75,24 +75,37 @@
             statusDiv.innerText = 'El servidor está buscando ofertas en tu wishlist. Esto puede tardar unos segundos...';
 
             try {
-                // Una única petición al Worker. Él hace todo el trabajo sucio.
                 const fetchUrl = `${WORKER_URL}?steamid=${steamId}&apikey=${apiKey}`;
                 const response = await fetch(fetchUrl);
                 
                 if (!response.ok) throw new Error("Error en el servidor Worker.");
 
-                const deals = await response.json();
+                const data = await response.json();
+                
+                // Si el Worker devolvió un error grave (ej. API Key mala)
+                if (data.error) throw new Error(data.error);
 
                 loaderDiv.style.display = 'none';
 
-                if (deals.length === 0) {
+                const deals = data.deals;
+                const blocked = data.blocked;
+                const total = data.total;
+
+                if (deals.length === 0 && blocked === 0) {
                     statusDiv.innerText = '❌ Ningún juego de tu wishlist está en oferta ahora mismo.';
                     return;
                 }
 
-                statusDiv.innerText = `✅ ¡Encontrados! Aquí tienes tus ${deals.length} juegos en oferta:`;
+                // Mostramos el resultado principal
+                let statusMessage = `✅ Encontrados ${deals.length} juegos en oferta de ${total} analizados.`;
+                
+                // SI HUBO BLOQUEOS, TE LO DECIMOS CLARAMENTE
+                if (blocked > 0) {
+                    statusMessage += ` ⚠️ (CheapShark bloqueó ${blocked} peticiones. Faltan juegos por verificar).`;
+                }
+                statusDiv.innerText = statusMessage;
 
-                // Pintamos los resultados de golpe
+                // Pintamos los resultados
                 deals.forEach(deal => {
                     const isLowest = parseFloat(deal.steamPrice) <= parseFloat(deal.lowestEver);
 
