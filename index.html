@@ -31,7 +31,17 @@
         .original-price { text-decoration: line-through; color: #626366; font-size: 1rem; }
         .lowest { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
         .chart-container { flex: 1; min-width: 300px; height: 150px; }
-        #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 20px; font-size: 1.1rem; }
+        #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 10px; font-size: 1.1rem; }
+        
+        /* Estilos de la barra de progreso */
+        .progress-container {
+            width: 80%; background-color: #2a475e; border-radius: 10px;
+            margin: 0 auto 20px auto; overflow: hidden; display: none;
+        }
+        .progress-bar {
+            height: 20px; background-color: #a4d007; width: 0%;
+            transition: width 0.5s ease; text-align: center; font-size: 12px; line-height: 20px; color: black; font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -46,6 +56,9 @@
     </div>
     
     <div id="status"></div>
+    <div class="progress-container" id="progress-container">
+        <div class="progress-bar" id="progress-bar">0%</div>
+    </div>
     <div id="results"></div>
 
     <script>
@@ -57,6 +70,8 @@
             const apiKey = document.getElementById('apiKeyInput').value;
             const resultsDiv = document.getElementById('results');
             const statusDiv = document.getElementById('status');
+            const progressContainer = document.getElementById('progress-container');
+            const progressBar = document.getElementById('progress-bar');
             
             if (!steamId || !apiKey) {
                 statusDiv.innerText = "⚠️ Por favor, introduce tu Steam ID y tu API Key.";
@@ -65,6 +80,9 @@
 
             resultsDiv.innerHTML = '';
             statusDiv.innerText = 'Conectando con la API Oficial de Steam...';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.innerText = '0%';
 
             try {
                 // Llamamos a nuestro Worker que usa la API oficial
@@ -79,18 +97,35 @@
                     throw new Error("Wishlist vacía o la API Key no tiene permisos sobre este perfil.");
                 }
 
-                statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando descuentos...`;
                 let dealsFound = 0;
 
-                for (const appId of appIds) {
+                for (let i = 0; i < appIds.length; i++) {
+                    const appId = appIds[i];
+                    
+                    // Actualizamos la barra de progreso
+                    const porcentaje = Math.round(((i + 1) / appIds.length) * 100);
+                    progressBar.style.width = porcentaje + '%';
+                    progressBar.innerText = porcentaje + '%';
+                    statusDiv.innerText = `Revisando juego ${i + 1} de ${appIds.length}...`;
+
                     const cheapSharkUrl = `https://www.cheapshark.com/api/1.0/deals?storeID=1&steamAppID=${appId}`;
                     
                     try {
                         const csResponse = await fetch(cheapSharkUrl);
-                        const csData = await csResponse.json();
+                        
+                        // Si CheapShark nos bloquea por hacer muchas peticiones, esperamos 3 segundos y reintentamos
+                        if (csResponse.status === 429) {
+                            statusDiv.innerText = "Límite de peticiones alcanzado. Esperando 3 segundos...";
+                            await new Promise(r => setTimeout(r, 3000));
+                            const retryResponse = await fetch(cheapSharkUrl);
+                            if (!retryResponse.ok) continue; // Si falla de nuevo, saltamos el juego
+                            var csData = await retryResponse.json();
+                        } else {
+                            var csData = await csResponse.json();
+                        }
 
                         // Si CheapShark tiene datos y está en descuento
-                        if (csData.length > 0 && parseFloat(csData[0].savings) > 0) {
+                        if (csData && csData.length > 0 && parseFloat(csData[0].savings) > 0) {
                             const deal = csData[0];
                             dealsFound++;
                             
@@ -100,8 +135,6 @@
                             const lowestEver = parseFloat(deal.lowestPrice).toFixed(2);
                             const discount = Math.round(parseFloat(deal.savings));
                             const isLowest = parseFloat(steamPrice) <= parseFloat(lowestEver);
-
-                            statusDiv.innerText = `Analizando: ${name}...`;
 
                             const card = document.createElement('div');
                             card.className = 'card';
@@ -123,17 +156,22 @@
                             resultsDiv.appendChild(card);
 
                             createTimelineChart(appId, name, steamPrice, lowestEver, originalPrice);
-                            await new Promise(r => setTimeout(r, 300));
                         }
                     } catch (err) {
                         console.error("Error con el juego ID " + appId, err);
                     }
+                    
+                    // PAUSA FUNDAMENTAL: 1.2 segundos para no hacer enojar a CheapShark
+                    await new Promise(r => setTimeout(r, 1200));
                 }
                 
-                statusDiv.innerText = dealsFound > 0 ? `✅ Se encontraron ${dealsFound} juegos en oferta.` : '❌ Ningún juego de tu wishlist está en oferta ahora mismo.';
+                statusDiv.innerText = dealsFound > 0 ? `✅ Búsqueda completada. Se encontraron ${dealsFound} juegos en oferta.` : '❌ Búsqueda completada. Ningún juego de tu wishlist está en oferta ahora mismo.';
+                progressBar.style.width = '100%';
+                progressBar.innerText = '100%';
 
             } catch (error) {
                 statusDiv.innerHTML = `<span style="color: #ff0000;">Error: ${error.message}</span>`;
+                progressContainer.style.display = 'none';
                 console.error(error);
             }
         }
