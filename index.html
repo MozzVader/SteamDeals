@@ -30,7 +30,7 @@
         .game-title { color: #66c0f4; font-size: 1.2rem; font-weight: bold; }
         .price-tag { font-size: 1.5rem; color: #a4d007; }
         .original-price { text-decoration: line-through; color: #626366; font-size: 1rem; }
-        .lowest { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
+        .discount-info { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
         .chart-container { flex: 1; min-width: 300px; height: 150px; }
         #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 10px; font-size: 1.1rem; }
         .progress-container {
@@ -118,7 +118,8 @@
 
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
-                const lotes = chunkArray(appIds, 20);
+                // LOTES DE 10 PARA NO MATAR A CLOUDFLARE
+                const lotes = chunkArray(appIds, 10);
                 let totalDeals = 0;
 
                 for (let i = 0; i < lotes.length; i++) {
@@ -138,18 +139,18 @@
                             totalDeals++;
                             
                             const curr = deal.currency;
-                            let lowestText = "";
+                            let discountText = "";
                             let isLowest = false;
 
-                            // LÓGICA DE ESTRELLITA PORCENTUAL
+                            // LÓGICA DE "MEJOR DESCUENTO HISTÓRICO"
                             if (deal.maxDiscountUs !== null) {
-                                // Si mi descuento actual es mayor o igual al máximo histórico de EE.UU.
+                                // Comparamos porcentajes: si mi descuento actual es mayor o igual al histórico de EE.UU.
                                 if (deal.discount >= deal.maxDiscountUs) {
                                     isLowest = true;
                                 }
-                                lowestText = `Máximo descuento histórico (EE.UU.): ${deal.maxDiscountUs}% (Mínimo USD: $${deal.lowestEverUsd}) ${isLowest ? '⭐ ¡ESTE ES EL MÍNIMO HISTÓRICO!' : ''}`;
+                                discountText = `Mejor descuento histórico (EE.UU.): ${deal.maxDiscountUs}% ${isLowest ? '⭐ ¡NUNCA ESTUVO TAN BARATO!' : ''}`;
                             } else {
-                                lowestText = `Mínimo histórico: No disponible en CheapShark`;
+                                discountText = `Descuento histórico: No disponible`;
                             }
 
                             const card = document.createElement('div');
@@ -160,7 +161,7 @@
                                     <span class="original-price">${curr} $${deal.originalPrice}</span>
                                     <span class="price-tag">${curr} $${deal.steamPrice}</span>
                                     <span>(-${deal.discount}%)</span>
-                                    <div class="lowest">${lowestText}</div>
+                                    <div class="discount-info">${discountText}</div>
                                 </div>
                                 <div class="chart-container">
                                     <canvas id="chart-${deal.appId}"></canvas>
@@ -186,10 +187,9 @@
         function createTimelineChart(appId, name, currentPrice, lowestPriceUsd, originalPrice, currency, currentDiscount, maxDiscountUs) {
             const ctx = document.getElementById(`chart-${appId}`).getContext('2d');
             
-            // Simulamos la línea de tiempo basada en los porcentajes
             const safeLowest = lowestPriceUsd !== null ? parseFloat(lowestPriceUsd) : null;
             
-            // Puntos para el gráfico. Si no hay dato de CS, usamos el precio actual como mínimo aproximado.
+            // Simulamos la línea de tiempo basada en los descuentos
             const dataPoints = [
                 parseFloat(originalPrice), 
                 safeLowest !== null ? (parseFloat(originalPrice) + safeLowest) / 1.5 : parseFloat(currentPrice) * 1.2, 
