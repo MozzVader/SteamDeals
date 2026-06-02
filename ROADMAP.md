@@ -10,12 +10,16 @@
 - [x] Badges historicas (NUEVO RECORD / IGUALO MEJOR / POR DEBAJO)
 - [x] Worker con User-Agent header (Cheapshark fix)
 - [x] SteamID y API key persistidos en localStorage
+- [x] CSS bar charts (reemplazaron Chart.js — ~65kb ahorrados)
+- [x] Review score dots con glow (Steam appreviews API)
+- [x] Carrito virtual (FAB + sidebar + checkbox en cards + localStorage)
+- [x] Cart sidebar footer (GitHub, Portfolio, Cafecito + preparado para notificaciones)
 
 ---
 
 ## Nota importante sobre el comportamiento de datos
 
-- La app **solo trae juegos en oferta**, no toda la wishlist completa (~82 juegos)
+- La app **solo trae juegos en oferta**, no toda la wishlist completa (~360 juegos)
 - Cuando un juego deja de estar en descuento, desaparece de los resultados
 - Steam actualiza precios/descuentos a las **14:00 hs Argentina (17:00 UTC)**
 - Es muy raro que aparezcan descuentos nuevos fuera de ese horario
@@ -25,18 +29,25 @@
 
 ## Fase 1 - Caché y consistencia de datos
 
-### 1.1 Cache Cheapshark en Cloudflare Worker (Cache API)
-**Problema**: La wishlist tiene ~82 juegos pero el Worker trae resultados inconsistentes (34-74 juegos). Causa: timeouts al hacer ~82 subrequests a Cheapshark por invocacion. Cloudflare Workers tiene limites de 50 subrequests (free plan) y 30s wall time.
+### 1.1 Cache Cheapshark + Reviews en Cloudflare Worker (Cache API)
+**Problema**: 360 juegos en la wishlist, procesados en lotes de 10. Sin cache: 4 subrequests por juego = 40 por lote (80% del limite de 50 en free plan). CheapShark tiembla mucho causando resultados inconsistentes.
 
-**Solucion**: Usar el [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) de Cloudflare para cachear las respuestas de Cheapshark. Los precios historicos no cambian todos los dias.
+**Solucion implementada**: [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) de Cloudflare con diferentes TTLs segun el tipo de dato:
 
-- Cachear por 12-24hs las respuestas de `/api/1.0/games?steamAppID=X` y `/api/1.0/games?id=X`
-- Reducir drásticamente las llamadas a Cheapshark por invocacion
-- Eliminar timeouts y hacer el Worker mas rapido
-- Key de cache: `cheapshark-${gameId}` con TTL de 12h
-- **Purga inteligente**: la cache de Cheapshark podría invalidarse a las ~14:30hs AR (despues del refresh de Steam) para que el Worker no use datos stale del día anterior si se consulta después del cambio
+- Steam appdetails: **NO cacheado** — precios actuales, siempre fresco
+- Steam appreviews: **7 dias TTL** — los reviews rara vez cambian, y si un juego sale de oferta probablemente no vuelva a aparecer en una semana
+- CheapShark (search + game data combinados): **12h TTL** — datos historicos, cambian infrecuentemente
+- Cache key: `cs:{appId}` y `rev:{appId}` usando namespace `steamdeals-cache.local`
+- Solo se cachea si el fetch fue exitoso (OK) — si falla, se reintenta en la proxima llamada
+- Datos procesados cacheados (no respuestas raw) — payload minimo
 
-**Archivos**: `worker.js`
+**Impacto en subrequests**:
+| Escenario | Subreqs/juego | Subreqs/lote (10) | % del limite |
+|---|---|---|---|
+| Sin cache (cold) | 4 | 40 | 80% |
+| Con cache (warm) | 1 | 10 | 20% |
+
+**Archivos**: `worker.js` ✅ implementado
 
 ### 1.2 Cache del ultimo resultado en localStorage
 **Problema**: Cada vez que se abre la app, hay que esperar a que procese toda la wishlist.
