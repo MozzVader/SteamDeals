@@ -342,15 +342,25 @@
             font-weight: 600;
         }
 
+        .badge {
+            display: inline-block;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 2px 6px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .badge-record { background: var(--accent); color: #000; }
+        .badge-match  { background: #ffe300; color: #000; }
+        .badge-low    { background: #333; color: var(--fg-dim); }
+
         .discount-info {
             color: var(--fg-dim);
             font-size: 0.85rem;
             margin-top: 8px;
-        }
-
-        .lowest-highlight {
-            color: var(--accent);
-            font-weight: 600;
         }
 
         /* ── Chart ── */
@@ -520,17 +530,22 @@
         function buildCard(deal) {
             const curr = deal.currency;
             let discountText = "";
-            let isLowest = false;
+            let badgeHtml = "";
 
             if (deal.maxDiscountUs !== null) {
-                if (deal.discount >= deal.maxDiscountUs) {
-                    isLowest = true;
+                const maxD = deal.maxDiscountUs;
+                if (deal.discount > maxD) {
+                    badgeHtml = `<span class="badge badge-record">Nuevo Record</span>`;
+                    discountText = `Mejor descuento historico: ${maxD}% — Lo supera por ${deal.discount - maxD} puntos`;
+                } else if (deal.discount === maxD) {
+                    badgeHtml = `<span class="badge badge-match">Igualo Mejor</span>`;
+                    discountText = `Mejor descuento historico: ${maxD}%`;
+                } else {
+                    badgeHtml = `<span class="badge badge-low">Por Debajo</span>`;
+                    discountText = `Mejor descuento historico: ${maxD}% — Faltan ${maxD - deal.discount} puntos para igualarlo`;
                 }
-                discountText = isLowest
-                    ? `Mejor descuento histórico: ${deal.maxDiscountUs}% — <span class="lowest-highlight">NUNCA ESTUVO TAN BARATO</span>`
-                    : `Mejor descuento histórico: ${deal.maxDiscountUs}%`;
             } else {
-                discountText = `Descuento histórico: No disponible`;
+                discountText = `Descuento historico: No disponible`;
             }
 
             const steamUrl = `https://store.steampowered.com/app/${deal.appId}`;
@@ -548,7 +563,7 @@
                     <div class="game-title">${deal.name}</div>
                     <span class="original-price">${curr} $${deal.originalPrice}</span>
                     <span class="price-tag">${curr} $${deal.steamPrice}</span>
-                    <span class="discount-badge">-${deal.discount}%</span>
+                    <span class="discount-badge">-${deal.discount}%</span>${badgeHtml}
                     <div class="discount-info">${discountText}</div>
                 </div>
                 <div class="chart-container">
