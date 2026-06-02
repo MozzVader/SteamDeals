@@ -427,6 +427,79 @@
             return result;
         }
 
+        function destroyAllCharts() {
+            document.querySelectorAll('canvas[id^="chart-"]').forEach(canvas => {
+                try {
+                    const chart = Chart.getChart(canvas);
+                    if (chart) chart.destroy();
+                } catch(e) { /* ignore */ }
+            });
+        }
+
+        function buildCard(deal) {
+            const curr = deal.currency;
+            let discountText = "";
+            let isLowest = false;
+
+            if (deal.maxDiscountUs !== null) {
+                if (deal.discount >= deal.maxDiscountUs) {
+                    isLowest = true;
+                }
+                discountText = isLowest
+                    ? `Mejor descuento histórico: ${deal.maxDiscountUs}% — <span class="lowest-highlight">NUNCA ESTUVO TAN BARATO</span>`
+                    : `Mejor descuento histórico: ${deal.maxDiscountUs}%`;
+            } else {
+                discountText = `Descuento histórico: No disponible`;
+            }
+
+            const steamUrl = `https://store.steampowered.com/app/${deal.appId}`;
+            const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${deal.appId}/header.jpg`;
+
+            const card = document.createElement('a');
+            card.className = 'card';
+            card.href = steamUrl;
+            card.target = '_blank';
+            card.rel = 'noopener noreferrer';
+            card.title = `Ver ${deal.name} en Steam`;
+            card.innerHTML = `
+                <img class="game-cover" src="${imgUrl}" alt="${deal.name}" loading="lazy">
+                <div class="game-info">
+                    <div class="game-title">${deal.name}</div>
+                    <span class="original-price">${curr} $${deal.originalPrice}</span>
+                    <span class="price-tag">${curr} $${deal.steamPrice}</span>
+                    <span class="discount-badge">-${deal.discount}%</span>
+                    <div class="discount-info">${discountText}</div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-${deal.appId}"></canvas>
+                </div>
+            `;
+            return card;
+        }
+
+        function getFilteredSorted() {
+            const search = document.getElementById('searchInput').value.toLowerCase().trim();
+            const sort = document.getElementById('sortSelect').value;
+            const minDiscount = parseInt(document.getElementById('minDiscountInput').value) || 0;
+
+            let filtered = allDeals.filter(deal => {
+                if (deal.discount < minDiscount) return false;
+                if (search && !deal.name.toLowerCase().includes(search)) return false;
+                return true;
+            });
+
+            switch (sort) {
+                case 'discount-desc': filtered.sort((a, b) => b.discount - a.discount); break;
+                case 'discount-asc':  filtered.sort((a, b) => a.discount - b.discount); break;
+                case 'price-asc':     filtered.sort((a, b) => parseFloat(a.steamPrice) - parseFloat(b.steamPrice)); break;
+                case 'price-desc':    filtered.sort((a, b) => parseFloat(b.steamPrice) - parseFloat(a.steamPrice)); break;
+                case 'name-asc':      filtered.sort((a, b) => a.name.localeCompare(b.name)); break;
+                case 'name-desc':     filtered.sort((a, b) => b.name.localeCompare(a.name)); break;
+            }
+
+            return filtered;
+        }
+
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
@@ -471,6 +544,7 @@
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
                 const lotes = chunkArray(appIds, 10);
+                let toolbarShown = false;
 
                 for (let i = 0; i < lotes.length; i++) {
                     const lote = lotes[i];
@@ -479,25 +553,43 @@
                     progressBar.innerText = porcentaje + '%';
                     statusDiv.innerText = `Analizando lote ${i + 1} de ${lotes.length}...`;
 
-                    const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lote.join(',')}&cc=${cc}`;
-                    const dealsRes = await fetch(dealsUrl);
+                    try {
+                        const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lote.join(',')}&cc=${cc}`;
+                        const dealsRes = await fetch(dealsUrl);
 
-                    if (dealsRes.ok) {
-                        const deals = await dealsRes.json();
-                        allDeals.push(...deals);
+                        if (dealsRes.ok) {
+                            const deals = await dealsRes.json();
+                            allDeals.push(...deals);
+
+                            // Show toolbar on first batch with deals
+                            if (deals.length > 0 && !toolbarShown) {
+                                toolbarShown = true;
+                                toolbar.classList.add('visible');
+                                document.getElementById('searchInput').value = '';
+                                document.getElementById('sortSelect').value = 'discount-desc';
+                                document.getElementById('minDiscountInput').value = '';
+                            }
+
+                            // Progressive render: append cards as they arrive
+                            deals.forEach(deal => {
+                                const card = buildCard(deal);
+                                resultsDiv.appendChild(card);
+                                createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, deal.currency, deal.discount, deal.maxDiscountUs);
+                            });
+
+                            updateCount();
+                        }
+                    } catch (batchErr) {
+                        console.error(`Error en lote ${i + 1}:`, batchErr);
                     }
+
                     if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
                 }
 
                 progressContainer.style.display = 'none';
 
                 if (allDeals.length > 0) {
-                    toolbar.classList.add('visible');
-                    document.getElementById('searchInput').value = '';
-                    document.getElementById('sortSelect').value = 'discount-desc';
-                    document.getElementById('minDiscountInput').value = '';
-                    renderDeals();
-                    statusDiv.innerText = '';
+                    statusDiv.innerText = `Búsqueda completada. ${allDeals.length} juegos en oferta.`;
                 } else {
                     statusDiv.innerText = 'Búsqueda completada. Ningún juego está en oferta ahora mismo.';
                 }
@@ -509,42 +601,22 @@
             }
         }
 
-        function renderDeals() {
-            const resultsDiv = document.getElementById('results');
-            const search = document.getElementById('searchInput').value.toLowerCase().trim();
-            const sort = document.getElementById('sortSelect').value;
-            const minDiscount = parseInt(document.getElementById('minDiscountInput').value) || 0;
-
-            // Destroy existing charts to avoid memory leaks
-            Chart.helpers.each(Chart.instances, (instance) => {
-                if (instance.canvas.id.startsWith('chart-')) {
-                    instance.destroy();
-                }
-            });
-
-            // Filter
-            let filtered = allDeals.filter(deal => {
-                if (deal.discount < minDiscount) return false;
-                if (search && !deal.name.toLowerCase().includes(search)) return false;
-                return true;
-            });
-
-            // Sort
-            switch (sort) {
-                case 'discount-desc': filtered.sort((a, b) => b.discount - a.discount); break;
-                case 'discount-asc':  filtered.sort((a, b) => a.discount - b.discount); break;
-                case 'price-asc':     filtered.sort((a, b) => parseFloat(a.steamPrice) - parseFloat(b.steamPrice)); break;
-                case 'price-desc':    filtered.sort((a, b) => parseFloat(b.steamPrice) - parseFloat(a.steamPrice)); break;
-                case 'name-asc':      filtered.sort((a, b) => a.name.localeCompare(b.name)); break;
-                case 'name-desc':     filtered.sort((a, b) => b.name.localeCompare(a.name)); break;
-            }
-
-            // Update count
+        function updateCount() {
+            const filtered = getFilteredSorted();
             document.getElementById('toolbar-count').innerHTML =
                 `<strong>${filtered.length}</strong> de ${allDeals.length} juegos`;
+        }
 
-            // Render
+        function renderDeals() {
+            const resultsDiv = document.getElementById('results');
+            const filtered = getFilteredSorted();
+
+            // Destroy charts safely
+            destroyAllCharts();
             resultsDiv.innerHTML = '';
+
+            document.getElementById('toolbar-count').innerHTML =
+                `<strong>${filtered.length}</strong> de ${allDeals.length} juegos`;
 
             if (filtered.length === 0) {
                 resultsDiv.innerHTML = '<div class="no-results">No se encontraron juegos con esos filtros.</div>';
@@ -552,46 +624,9 @@
             }
 
             filtered.forEach(deal => {
-                const curr = deal.currency;
-                let discountText = "";
-                let isLowest = false;
-
-                if (deal.maxDiscountUs !== null) {
-                    if (deal.discount >= deal.maxDiscountUs) {
-                        isLowest = true;
-                    }
-                    discountText = isLowest
-                        ? `Mejor descuento histórico: ${deal.maxDiscountUs}% — <span class="lowest-highlight">NUNCA ESTUVO TAN BARATO</span>`
-                        : `Mejor descuento histórico: ${deal.maxDiscountUs}%`;
-                } else {
-                    discountText = `Descuento histórico: No disponible`;
-                }
-
-                const steamUrl = `https://store.steampowered.com/app/${deal.appId}`;
-                const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${deal.appId}/header.jpg`;
-
-                const card = document.createElement('a');
-                card.className = 'card';
-                card.href = steamUrl;
-                card.target = '_blank';
-                card.rel = 'noopener noreferrer';
-                card.title = `Ver ${deal.name} en Steam`;
-                card.innerHTML = `
-                    <img class="game-cover" src="${imgUrl}" alt="${deal.name}" loading="lazy">
-                    <div class="game-info">
-                        <div class="game-title">${deal.name}</div>
-                        <span class="original-price">${curr} $${deal.originalPrice}</span>
-                        <span class="price-tag">${curr} $${deal.steamPrice}</span>
-                        <span class="discount-badge">-${deal.discount}%</span>
-                        <div class="discount-info">${discountText}</div>
-                    </div>
-                    <div class="chart-container">
-                        <canvas id="chart-${deal.appId}"></canvas>
-                    </div>
-                `;
+                const card = buildCard(deal);
                 resultsDiv.appendChild(card);
-
-                createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, curr, deal.discount, deal.maxDiscountUs);
+                createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, deal.currency, deal.discount, deal.maxDiscountUs);
             });
         }
 
