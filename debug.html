@@ -442,9 +442,24 @@
             const chunks = [];
             for (let i = 0; i < appIds.length; i += BATCH) chunks.push(appIds.slice(i, i + BATCH));
 
-            const logLines = [];
+            // Show results section immediately for live log
+            const section = document.getElementById('resultsSection');
+            section.style.display = 'block';
+            const logArea = document.getElementById('logArea');
+            logArea.innerHTML = '';
+            document.getElementById('summaryGrid').innerHTML = '<div class="summary-card"><div class="label">Estado</div><div class="value amber">Ejecutando...</div></div>';
+
+            function appendLog(text, cls) {
+                const line = document.createElement('div');
+                line.className = cls === 'ok' ? 'line-ok' : cls === 'warn' ? 'line-warn' : cls === 'err' ? 'line-err' : 'line-dim';
+                line.textContent = text;
+                logArea.appendChild(line);
+                logArea.scrollTop = logArea.scrollHeight;
+            }
+
             let totalDeals = 0;
             let totalDebug = null;
+            let steamRateLimits = 0;
 
             for (let i = 0; i < chunks.length; i++) {
                 const pct = Math.round(((i + 1) / chunks.length) * 100);
@@ -470,57 +485,47 @@
                         }
                     }
 
-                    // Log per chunk
+                    // Live log per chunk
                     const chunkDeals = data.deals || [];
                     const chunkDebug = data._debug;
-                    logLines.push({ text: `Chunk ${i + 1}: ${chunks[i].length} appIds → ${chunkDeals.length} deals (${chunkDebug.totalMs}ms)`, cls: chunkDeals.length > 0 ? 'ok' : 'warn' });
+                    const chunkErrors = (chunkDebug.errors || []).filter(e => e.api === 'appdetails');
+                    if (chunkErrors.length > 0) steamRateLimits += chunkErrors.length;
+
+                    appendLog(`Chunk ${i + 1}: ${chunks[i].length} appIds → ${chunkDeals.length} deals (${chunkDebug.totalMs}ms)`, chunkDeals.length > 0 ? 'ok' : 'warn');
                     chunkDebug.games.forEach(g => {
                         let detail = `  ${g.appId}`;
                         if (g.dealFound) detail += ' ✅';
                         else detail += ' ⬜ sin descuento';
                         g.calls.forEach(c => {
                             const status = c.cached ? '🔒' : '🌐';
-                            const ok = c.ok ? '' : ' ❌';
+                            const ok = c.cached ? '' : (c.ok ? '' : ' ❌');
                             detail += ` ${status}${c.api}${ok} ${c.ms}ms`;
                         });
-                        logLines.push({ text: detail, cls: g.dealFound ? 'ok' : 'dim' });
+                        appendLog(detail, g.dealFound ? 'ok' : (chunkErrors.some(e => e.appId === g.appId) ? 'err' : 'dim'));
                     });
                 } catch(e) {
-                    logLines.push({ text: `Chunk ${i + 1}: ERROR — ${e.message}`, cls: 'err' });
+                    appendLog(`Chunk ${i + 1}: ERROR — ${e.message}`, 'err');
                 }
                 if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 500));
             }
 
             progressContainer.style.display = 'none';
 
-            // Show results
-            const section = document.getElementById('resultsSection');
-            section.style.display = 'block';
-
             // Summary
             const d = totalDebug;
             const cacheTotal = d.cacheHits + d.cacheMisses;
             const hitRate = cacheTotal > 0 ? Math.round((d.cacheHits / cacheTotal) * 100) : 0;
+            const rateLimitPct = d.gamesProcessed > 0 ? Math.round((steamRateLimits / d.gamesProcessed) * 100) : 0;
             document.getElementById('summaryGrid').innerHTML = `
                 <div class="summary-card"><div class="label">Juegos procesados</div><div class="value blue">${d.gamesProcessed}</div></div>
                 <div class="summary-card"><div class="label">Deals encontrados</div><div class="value green">${totalDeals}</div></div>
                 <div class="summary-card"><div class="label">Subrequests</div><div class="value ${d.subrequests > 40 ? 'red' : d.subrequests > 30 ? 'amber' : 'green'}">${d.subrequests}</div></div>
-                <div class="summary-card"><div class="label">Subreqs / juego</div><div class="value ${d.gamesProcessed > 0 ? (d.subrequests / d.gamesProcessed).toFixed(1) : '—'}">${d.gamesProcessed > 0 ? (d.subrequests / d.gamesProcessed).toFixed(1) : '—'}</div></div>
-                <div class="summary-card"><div class="label">Cache Hits</div><div class="value green">${d.cacheHits} (${hitRate}%)</div></div>
-                <div class="summary-card"><div class="label">Cache Misses</div><div class="value amber">${d.cacheMisses}</div></div>
-                <div class="summary-card"><div class="label">Errores</div><div class="value ${d.errors.length > 0 ? 'red' : 'green'}">${d.errors.length}</div></div>
-                <div class="summary-card"><div class="label">Tiempo Total</div><div class="value blue">${d.totalMs}ms (${(d.totalMs / 1000).toFixed(1)}s)</div></div>
+                <div class="summary-card"><div class="label">Subreqs / juego</div><div class="value">${d.gamesProcessed > 0 ? (d.subrequests / d.gamesProcessed).toFixed(1) : '—'}</div></div>
+                <div class="summary-card"><div class="label">Cache Hit Rate</div><div class="value green">${hitRate}%</div></div>
+                <div class="summary-card"><div class="label">Rate Limits</div><div class="value ${steamRateLimits > 0 ? 'red' : 'green'}">${steamRateLimits} (${rateLimitPct}%)</div></div>
+                <div class="summary-card"><div class="label">Otros Errores</div><div class="value ${d.errors.length - steamRateLimits > 0 ? 'amber' : 'green'}">${d.errors.length - steamRateLimits}</div></div>
+                <div class="summary-card"><div class="label">Tiempo Total</div><div class="value blue">${(d.totalMs / 1000).toFixed(1)}s</div></div>
             `;
-
-            // Log
-            const logArea = document.getElementById('logArea');
-            logArea.innerHTML = '';
-            logLines.forEach(l => {
-                const line = document.createElement('div');
-                line.className = l.cls === 'ok' ? 'line-ok' : l.cls === 'warn' ? 'line-warn' : l.cls === 'err' ? 'line-err' : 'line-dim';
-                line.textContent = l.text;
-                logArea.appendChild(line);
-            });
 
             statusEl.innerText = `Test completado. ${totalDeals} deals encontrados en ${(d.totalMs / 1000).toFixed(1)}s`;
         }

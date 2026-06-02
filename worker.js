@@ -88,6 +88,8 @@ export default {
           const appdetailsMs = t1();
           if (debug) { dbg.subrequests++; gameDbg.calls.push({ api: 'appdetails', cached: false, ms: appdetailsMs, ok: steamRes.ok }); }
 
+          if (!steamRes.ok && debug) { dbg.errors.push({ appId, api: 'appdetails', error: 'HTTP ' + steamRes.status }); }
+
           if (steamRes.ok) {
             const steamData = await steamRes.json();
 
@@ -109,7 +111,7 @@ export default {
                   if (cachedCs !== null) {
                     lowestEverUsd = cachedCs.lowestEverUsd;
                     maxDiscountUs = cachedCs.maxDiscountUs;
-                    if (debug) { dbg.cacheHits++; gameDbg.calls.push({ api: 'cheapshark', cached: true, ms: cacheCheckMs }); }
+                    if (debug) { dbg.cacheHits++; gameDbg.calls.push({ api: 'cheapshark', cached: true, ms: cacheCheckMs, ok: true }); }
                   } else {
                     if (debug) { dbg.cacheMisses++; }
                     const t3 = timer();
@@ -159,7 +161,7 @@ export default {
                   if (cachedRev !== null) {
                     reviewScore = cachedRev.score;
                     reviewLabel = cachedRev.label;
-                    if (debug) { dbg.cacheHits++; gameDbg.calls.push({ api: 'reviews', cached: true, ms: cacheCheckMs }); }
+                    if (debug) { dbg.cacheHits++; gameDbg.calls.push({ api: 'reviews', cached: true, ms: cacheCheckMs, ok: true }); }
                   } else {
                     if (debug) { dbg.cacheMisses++; }
                     const t5 = timer();
