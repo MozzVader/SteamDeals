@@ -190,13 +190,13 @@
         }
 
         .toolbar input[type="text"] {
-            width: 220px;
+            flex: 1;
             min-width: 140px;
-            flex: unset;
         }
 
         .toolbar select {
             width: 190px;
+            flex-shrink: 0;
         }
 
         /* ── Range Slider ── */
@@ -225,12 +225,13 @@
             -webkit-appearance: none;
             appearance: none;
             width: 100px;
-            height: 4px;
+            height: 14px;
             background: var(--border);
             outline: none;
             cursor: pointer;
             border: none;
             padding: 0;
+            margin: 0;
         }
 
         input[type="range"]::-webkit-slider-thumb {
@@ -241,6 +242,7 @@
             background: var(--accent);
             cursor: pointer;
             border: none;
+            margin-top: -5px;
         }
 
         input[type="range"]::-moz-range-thumb {
@@ -330,7 +332,7 @@
 
         .discount-badge {
             font-size: 0.9rem;
-            color: var(--warn);
+            color: #ffe300;
             font-weight: 600;
         }
 
