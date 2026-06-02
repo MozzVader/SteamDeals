@@ -1282,6 +1282,67 @@
             return filtered;
         }
 
+        const CACHE_KEY = 'steamDealsCache';
+        const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+        const STEAM_REFRESH_HOUR_AR = 17; // 14hs AR = 17hs UTC
+
+        function getDealsCache() {
+            try {
+                const raw = localStorage.getItem(CACHE_KEY);
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch(e) { return null; }
+        }
+
+        function setDealsCache(deals) {
+            try {
+                localStorage.setItem(CACHE_KEY, JSON.stringify({
+                    deals,
+                    timestamp: Date.now(),
+                    steamId: document.getElementById('steamIdInput').value,
+                    country: document.getElementById('countryInput').value.toLowerCase()
+                }));
+            } catch(e) {}
+        }
+
+        function isCacheFresh(cache) {
+            if (!cache || !cache.timestamp || !cache.deals) return false;
+            const age = Date.now() - cache.timestamp;
+            if (age > CACHE_TTL_MS) return false;
+            // Smart timestamp: si cache es de antes del refresh de Steam (14hs AR / 17hs UTC)
+            // y ya pasaron las 14hs AR, el cache podría estar stale
+            const cacheDate = new Date(cache.timestamp);
+            const now = new Date();
+            const utcHour = now.getUTCHours();
+            if (cacheDate.getUTCDate() === now.getUTCDate()) {
+                // Mismo día: si el cache es de antes de las 17hs UTC y ya es después, forzar fresh
+                if (cacheDate.getUTCHours() < STEAM_REFRESH_HOUR_AR && utcHour >= STEAM_REFRESH_HOUR_AR) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function showCachedResults(cache) {
+            const resultsDiv = document.getElementById('results');
+            const statusDiv = document.getElementById('status');
+            const toolbar = document.getElementById('toolbar');
+            const age = Math.round((Date.now() - cache.timestamp) / 60000);
+            const ageText = age < 60 ? `${age} min` : `${Math.round(age / 60)}hs`;
+
+            allDeals = cache.deals;
+            toolbar.classList.add('visible');
+
+            resultsDiv.innerHTML = '';
+            allDeals.forEach(deal => {
+                const card = buildCard(deal);
+                resultsDiv.appendChild(card);
+            });
+
+            updateCount();
+            statusDiv.innerHTML = `<span style="color: var(--warn)">Mostrando datos cacheados (${ageText} atrás). Actualizando en background...</span>`;
+        }
+
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
@@ -1301,13 +1362,25 @@
             localStorage.setItem('steamApiKey', apiKey);
             localStorage.setItem('steamCountry', cc);
 
-            resultsDiv.innerHTML = '';
-            allDeals = [];
-            toolbar.classList.remove('visible');
+            // ── Fase 1.2: Show cached results instantly ──
+            const cachedDeals = getDealsCache();
+            const hasCache = isCacheFresh(cachedDeals) && cachedDeals.steamId === steamId && cachedDeals.country === cc;
+            if (hasCache) {
+                showCachedResults(cachedDeals);
+            } else {
+                resultsDiv.innerHTML = '';
+                allDeals = [];
+                toolbar.classList.remove('visible');
+            }
+
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             progressBar.innerText = '0%';
-            statusDiv.innerText = 'Obteniendo tu wishlist...';
+            if (!hasCache) {
+                statusDiv.innerText = 'Obteniendo tu wishlist...';
+            } else {
+                statusDiv.innerHTML = `<span style="color: var(--warn)">Mostrando datos cacheados. Actualizando en background...</span>`;
+            }
 
             try {
                 const wishlistUrl = `${WORKER_URL}?mode=wishlist&steamid=${steamId}&apikey=${apiKey}`;
@@ -1325,7 +1398,7 @@
 
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
-                const lotes = chunkArray(appIds, 10);
+                const lotes = chunkArray(appIds, 8);
                 let toolbarShown = false;
 
                 for (let i = 0; i < lotes.length; i++) {
@@ -1370,6 +1443,7 @@
                 }
 
                 progressContainer.style.display = 'none';
+                setDealsCache(allDeals);
 
                 if (allDeals.length > 0) {
                     statusDiv.innerText = `Búsqueda completada. ${allDeals.length} juegos en oferta.`;
