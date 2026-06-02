@@ -190,17 +190,77 @@
         }
 
         .toolbar input[type="text"] {
-            flex: 1;
+            width: 220px;
             min-width: 140px;
-        }
-
-        .toolbar input[type="number"] {
-            width: 72px;
-            text-align: center;
+            flex: unset;
         }
 
         .toolbar select {
-            width: 200px;
+            width: 190px;
+        }
+
+        /* ── Range Slider ── */
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .slider-label {
+            color: var(--fg-dim);
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .slider-value {
+            color: var(--accent);
+            font-size: 0.85rem;
+            font-weight: 700;
+            min-width: 28px;
+            text-align: center;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100px;
+            height: 4px;
+            background: var(--border);
+            outline: none;
+            cursor: pointer;
+            border: none;
+            padding: 0;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: var(--accent);
+            cursor: pointer;
+            border: none;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            background: var(--accent);
+            cursor: pointer;
+            border: none;
+            border-radius: 0;
+        }
+
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 4px;
+            background: var(--border);
+        }
+
+        input[type="range"]::-moz-range-track {
+            height: 4px;
+            background: var(--border);
+            border: none;
         }
 
         .toolbar-count {
@@ -340,14 +400,18 @@
                 flex-wrap: wrap;
             }
             .toolbar input[type="text"] {
-                min-width: 100%;
+                flex: 1;
+                min-width: 0;
             }
             .toolbar select {
                 flex: 1;
-                min-width: 120px;
+                min-width: 0;
             }
-            .toolbar input[type="number"] {
-                flex: 0 0 72px;
+            .slider-group {
+                width: 100%;
+            }
+            input[type="range"] {
+                flex: 1;
             }
             .toolbar-count {
                 width: 100%;
@@ -398,7 +462,11 @@
                 <option value="discount-asc">Menor descuento</option>
                 <option value="price-desc">Mayor precio</option>
             </select>
-            <input type="number" id="minDiscountInput" placeholder="% min" min="0" max="100" title="Descuento mínimo (%)">
+            <div class="slider-group">
+                <span class="slider-label">% min</span>
+                <input type="range" id="minDiscountInput" min="0" max="100" value="0" title="Descuento mínimo">
+                <span class="slider-value" id="minDiscountValue">0</span>
+            </div>
             <span class="toolbar-count" id="toolbar-count"></span>
         </div>
 
@@ -416,7 +484,12 @@
 
             document.getElementById('searchInput').addEventListener('input', renderDeals);
             document.getElementById('sortSelect').addEventListener('change', renderDeals);
-            document.getElementById('minDiscountInput').addEventListener('input', renderDeals);
+            const slider = document.getElementById('minDiscountInput');
+            const sliderVal = document.getElementById('minDiscountValue');
+            slider.addEventListener('input', () => {
+                sliderVal.textContent = slider.value;
+                renderDeals();
+            });
         };
 
         function chunkArray(array, size) {
@@ -567,7 +640,8 @@
                                 toolbar.classList.add('visible');
                                 document.getElementById('searchInput').value = '';
                                 document.getElementById('sortSelect').value = 'discount-desc';
-                                document.getElementById('minDiscountInput').value = '';
+                                document.getElementById('minDiscountInput').value = '0';
+                                document.getElementById('minDiscountValue').textContent = '0';
                             }
 
                             // Progressive render: append cards as they arrive
