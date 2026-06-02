@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WishlistDeals</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js removed — using CSS-only price bars -->
     <style>
         /* ── Reset & Base ── */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -363,11 +363,61 @@
             margin-top: 8px;
         }
 
-        /* ── Chart ── */
-        .chart-container {
+        /* ── Price Bars ── */
+        .price-bars {
             flex-shrink: 0;
-            width: 320px;
-            height: 140px;
+            width: 220px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .price-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .price-bar-label {
+            font-size: 0.7rem;
+            color: var(--fg-dim);
+            width: 52px;
+            text-align: right;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
+        .price-bar-track {
+            flex: 1;
+            height: 10px;
+            background: #1a1a1a;
+            overflow: hidden;
+        }
+
+        .price-bar-fill {
+            height: 100%;
+            transition: width 0.4s ease;
+        }
+
+        .price-bar-fill.fill-original {
+            background: #444;
+        }
+
+        .price-bar-fill.fill-min {
+            background: var(--accent);
+        }
+
+        .price-bar-fill.fill-current {
+            background: var(--blue);
+        }
+
+        .price-bar-value {
+            font-size: 0.7rem;
+            color: var(--fg);
+            width: 48px;
+            text-align: right;
+            flex-shrink: 0;
+            font-weight: 600;
         }
 
         /* ── No results ── */
@@ -405,7 +455,7 @@
                 max-height: 160px;
                 object-fit: cover;
             }
-            .chart-container {
+            .price-bars {
                 width: 100%;
             }
             .brand-text {
@@ -518,14 +568,7 @@
             return result;
         }
 
-        function destroyAllCharts() {
-            document.querySelectorAll('canvas[id^="chart-"]').forEach(canvas => {
-                try {
-                    const chart = Chart.getChart(canvas);
-                    if (chart) chart.destroy();
-                } catch(e) { /* ignore */ }
-            });
-        }
+
 
         function buildCard(deal) {
             const curr = deal.currency;
@@ -551,6 +594,35 @@
             const steamUrl = `https://store.steampowered.com/app/${deal.appId}`;
             const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${deal.appId}/header.jpg`;
 
+            // Build CSS-only price bars
+            const origPrice = parseFloat(deal.originalPrice) || 0;
+            const currPrice = parseFloat(deal.steamPrice) || 0;
+            const minPrice = deal.lowestEverUsd !== null ? parseFloat(deal.lowestEverUsd) : null;
+            const maxRef = Math.max(origPrice, 1);
+
+            const origPct = Math.min((origPrice / maxRef) * 100, 100);
+            const currPct = Math.min((currPrice / maxRef) * 100, 100);
+            const minPct = minPrice !== null ? Math.min((minPrice / maxRef) * 100, 100) : 0;
+
+            let barsHtml = '';
+            barsHtml += `<div class="price-bar-row">
+                <span class="price-bar-label">Original</span>
+                <div class="price-bar-track"><div class="price-bar-fill fill-original" style="width:${origPct}%"></div></div>
+                <span class="price-bar-value">$${origPrice.toFixed(2)}</span>
+            </div>`;
+            if (minPrice !== null) {
+                barsHtml += `<div class="price-bar-row">
+                    <span class="price-bar-label">Mínimo</span>
+                    <div class="price-bar-track"><div class="price-bar-fill fill-min" style="width:${minPct}%"></div></div>
+                    <span class="price-bar-value">$${minPrice.toFixed(2)}</span>
+                </div>`;
+            }
+            barsHtml += `<div class="price-bar-row">
+                <span class="price-bar-label">Hoy</span>
+                <div class="price-bar-track"><div class="price-bar-fill fill-current" style="width:${currPct}%"></div></div>
+                <span class="price-bar-value">$${currPrice.toFixed(2)}</span>
+            </div>`;
+
             const card = document.createElement('a');
             card.className = 'card';
             card.href = steamUrl;
@@ -566,9 +638,7 @@
                     <span class="discount-badge">-${deal.discount}%</span>${badgeHtml}
                     <div class="discount-info">${discountText}</div>
                 </div>
-                <div class="chart-container">
-                    <canvas id="chart-${deal.appId}"></canvas>
-                </div>
+                <div class="price-bars">${barsHtml}</div>
             `;
             return card;
         }
@@ -671,7 +741,6 @@
                             deals.forEach(deal => {
                                 const card = buildCard(deal);
                                 resultsDiv.appendChild(card);
-                                createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, deal.currency, deal.discount, deal.maxDiscountUs);
                             });
 
                             updateCount();
@@ -708,8 +777,6 @@
             const resultsDiv = document.getElementById('results');
             const filtered = getFilteredSorted();
 
-            // Destroy charts safely
-            destroyAllCharts();
             resultsDiv.innerHTML = '';
 
             document.getElementById('toolbar-count').innerHTML =
@@ -723,55 +790,10 @@
             filtered.forEach(deal => {
                 const card = buildCard(deal);
                 resultsDiv.appendChild(card);
-                createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, deal.currency, deal.discount, deal.maxDiscountUs);
             });
         }
 
-        function createTimelineChart(appId, name, currentPrice, lowestPriceUsd, originalPrice, currency, currentDiscount, maxDiscountUs) {
-            const ctx = document.getElementById(`chart-${appId}`).getContext('2d');
 
-            const safeLowest = lowestPriceUsd !== null ? parseFloat(lowestPriceUsd) : null;
-
-            const dataPoints = [
-                parseFloat(originalPrice),
-                safeLowest !== null ? (parseFloat(originalPrice) + safeLowest) / 1.5 : parseFloat(currentPrice) * 1.2,
-                safeLowest !== null ? safeLowest : parseFloat(currentPrice),
-                parseFloat(currentPrice)
-            ];
-
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: ['Lanzamiento', 'Rebaja Anterior', 'Mínimo Histórico', 'Hoy'],
-                    datasets: [{
-                        label: 'Precio',
-                        data: dataPoints,
-                        borderColor: '#00E205',
-                        backgroundColor: 'rgba(0, 226, 5, 0.08)',
-                        fill: true,
-                        tension: 0.3,
-                        pointBackgroundColor: '#00E205',
-                        pointBorderColor: '#00E205',
-                        pointRadius: 3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: {
-                            ticks: { color: '#777', callback: v => '$' + v },
-                            grid: { color: '#1a1a1a' }
-                        },
-                        x: {
-                            ticks: { color: '#777' },
-                            grid: { color: '#1a1a1a' }
-                        }
-                    }
-                }
-            });
-        }
     </script>
 </body>
 </html>
