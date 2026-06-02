@@ -144,11 +144,11 @@
 
                             // LÓGICA DE "MEJOR DESCUENTO HISTÓRICO"
                             if (deal.maxDiscountUs !== null) {
-                                // Comparamos porcentajes: si mi descuento actual es mayor o igual al histórico de EE.UU.
+                                // Si mi descuento actual es mayor o igual al histórico de EE.UU.
                                 if (deal.discount >= deal.maxDiscountUs) {
                                     isLowest = true;
                                 }
-                                discountText = `Mejor descuento histórico (EE.UU.): ${deal.maxDiscountUs}% ${isLowest ? '⭐ ¡NUNCA ESTUVO TAN BARATO!' : ''}`;
+                                discountText = `Mejor descuento histórico: ${deal.maxDiscountUs}% ${isLowest ? '⭐ ¡NUNCA ESTUVO TAN BARATO!' : ''}`;
                             } else {
                                 discountText = `Descuento histórico: No disponible`;
                             }
