@@ -91,6 +91,20 @@ export default {
                   console.error("CheapShark error for " + appId + ": " + csErr.message);
                 }
 
+                // Extraer review score (ya viene en appdetails, sin llamada extra)
+                const recs = steamData[appId].data.recommendations || {};
+                const totalPos = recs.total_positive || 0;
+                const totalNeg = recs.total_negative || 0;
+                const totalRecs = totalPos + totalNeg;
+                let reviewScore = null;
+                let reviewLabel = '';
+                if (totalRecs > 0) {
+                  reviewScore = Math.round((totalPos / totalRecs) * 100);
+                  if (reviewScore >= 70) reviewLabel = 'positive';
+                  else if (reviewScore >= 40) reviewLabel = 'mixed';
+                  else reviewLabel = 'negative';
+                }
+
                 deals.push({
                   appId: appId,
                   name: gameName,
@@ -99,7 +113,9 @@ export default {
                   discount: priceInfo.discount_percent,
                   currency: priceInfo.currency || 'USD',
                   lowestEverUsd: lowestEverUsd,
-                  maxDiscountUs: maxDiscountUs
+                  maxDiscountUs: maxDiscountUs,
+                  reviewScore: reviewScore,
+                  reviewLabel: reviewLabel
                 });
               }
             }
