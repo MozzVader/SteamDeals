@@ -368,8 +368,8 @@
             background: rgba(255, 68, 68, 0.35);
         }
 
-        .review-dot[title]:hover::before {
-            content: attr(title);
+        .review-dot[data-tooltip]:hover::before {
+            content: attr(data-tooltip);
             position: absolute;
             bottom: calc(100% + 6px);
             left: 50%;
@@ -699,7 +699,7 @@
                 <img class="game-cover" src="${imgUrl}" alt="${deal.name}" loading="lazy">
                 <div class="game-info">
                     <div class="game-title-row">
-                        <div class="game-title">${deal.name}</div>${deal.reviewScore != null && deal.reviewLabel ? `<div class="review-dot dot-${deal.reviewLabel}" title="${deal.reviewScore}% positivo"></div>` : ''}
+                        <div class="game-title">${deal.name}</div>${deal.reviewScore != null && deal.reviewLabel ? `<div class="review-dot dot-${deal.reviewLabel}" data-tooltip="${deal.reviewScore}% positivo"></div>` : ''}
                     </div>
                     <span class="original-price">${curr} $${deal.originalPrice}</span>
                     <span class="price-tag">${curr} $${deal.steamPrice}</span>
