@@ -13,6 +13,16 @@
 
 ---
 
+## Nota importante sobre el comportamiento de datos
+
+- La app **solo trae juegos en oferta**, no toda la wishlist completa (~82 juegos)
+- Cuando un juego deja de estar en descuento, desaparece de los resultados
+- Steam actualiza precios/descuentos a las **14:00 hs Argentina (17:00 UTC)**
+- Es muy raro que aparezcan descuentos nuevos fuera de ese horario
+- Por lo tanto, los cambios relevantes ocurren una vez por día alrededor de las 14hs
+
+---
+
 ## Fase 1 - Caché y consistencia de datos
 
 ### 1.1 Cache Cheapshark en Cloudflare Worker (Cache API)
@@ -24,6 +34,7 @@
 - Reducir drásticamente las llamadas a Cheapshark por invocacion
 - Eliminar timeouts y hacer el Worker mas rapido
 - Key de cache: `cheapshark-${gameId}` con TTL de 12h
+- **Purga inteligente**: la cache de Cheapshark podría invalidarse a las ~14:30hs AR (despues del refresh de Steam) para que el Worker no use datos stale del día anterior si se consulta después del cambio
 
 **Archivos**: `worker.js`
 
@@ -35,19 +46,23 @@
 - Al abrir la app: si hay cache < 6-12hs, mostrar inmediatamente (carga instantanea)
 - Paralelamente, ejecutar fetch fresco en background
 - Cuando llega el resultado nuevo, reemplazar cache y re-renderizar
+- **Timestamp inteligente**: si el cache es de antes de las 14:00hs AR y ya pasaron las 14:00hs, forzar fetch fresco (porque Steam ya refrescó precios)
 
 **Beneficios**:
 - Carga instantanea para el usuario
 - Datos siempre frescos (se actualizan en background)
+- Respetar el ciclo de precios de Steam (14:00hs AR)
 
 **Archivos**: `index.html`
 
 ### 1.3 Comparacion cache vs fresco (badges de cambio)
-**Beneficio extra del cache**: al tener "lo que habia ayer" vs "lo que hay hoy", podemos detectar cambios:
+**Beneficio extra del cache**: al tener "lo que habia ayer" vs "lo que hay hoy", podemos detectar cambios. Como Steam refresca a las 14hs, la comparación tiene sentido una vez por día:
 
-- Si un juego tiene mejor descuento que la ultima vez → destacar con badge "BAJO DE PRECIO" o similar
-- Si aparece un juego nuevo en oferta → destacar
-- Si subio de precio → indicar "SUBIO"
+**Eventos detectables**:
+- `NUEVO EN OFERTA` - Juego que no estaba en descuento ayer y hoy aparece
+- `SALIÓ DE OFERTA` - Juego que estaba en descuento ayer y hoy ya no está (podría mostrarse en gris al final de la lista o simplemente no aparecer)
+- `BAJÓ DE PRECIO` - Juego que ya estaba en oferta pero mejoró su descuento %
+- `SUBIÓ DE PRECIO` - Juego que sigue en oferta pero empeoró su descuento % (menos probable pero posible)
 
 **Archivos**: `index.html`
 
@@ -59,10 +74,12 @@
 - Usar el cache de localStorage para comparar cada vez que se abre la app
 - Zero infraestructura extra
 - Notificaciones dentro de la app (badges, toasts)
+- Ideal para uso casual: abrir la app después de las 14hs y ver qué cambió
 
 ### Opcion B - Cloudflare KV + GitHub Actions cron
 - KV store gratuito que viene con Cloudflare Workers
 - Guardar snapshot diario: `key = "YYYY-MM-DD"`, `value = JSON con deals`
+- Cron ejecutarse después de las 14:00hs AR (ej: 14:30hs = 17:30 UTC) para capturar el refresh
 - GitHub Actions cron llama al Worker, compara KV[hoy] vs KV[ayer]
 - Enviar resultados via Discord webhook, email, etc.
 - Mas complejo pero poderoso
