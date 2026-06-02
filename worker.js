@@ -91,18 +91,24 @@ export default {
                   console.error("CheapShark error for " + appId + ": " + csErr.message);
                 }
 
-                // Extraer review score (ya viene en appdetails, sin llamada extra)
-                const recs = steamData[appId].data.recommendations || {};
-                const totalPos = recs.total_positive || 0;
-                const totalNeg = recs.total_negative || 0;
-                const totalRecs = totalPos + totalNeg;
+                // Obtener review score desde Steam appreviews API
                 let reviewScore = null;
                 let reviewLabel = '';
-                if (totalRecs > 0) {
-                  reviewScore = Math.round((totalPos / totalRecs) * 100);
-                  if (reviewScore >= 70) reviewLabel = 'positive';
-                  else if (reviewScore >= 40) reviewLabel = 'mixed';
-                  else reviewLabel = 'negative';
+                try {
+                  const reviewUrl = `https://store.steampowered.com/appreviews/${appId}?json=1&num_per_page=0&purchase_type=all`;
+                  const reviewRes = await fetch(reviewUrl);
+                  if (reviewRes.ok) {
+                    const reviewData = await reviewRes.json();
+                    const qs = reviewData.query_summary;
+                    if (qs && qs.total_reviews > 0) {
+                      reviewScore = Math.round((qs.total_positive / qs.total_reviews) * 100);
+                      if (reviewScore >= 70) reviewLabel = 'positive';
+                      else if (reviewScore >= 40) reviewLabel = 'mixed';
+                      else reviewLabel = 'negative';
+                    }
+                  }
+                } catch (revErr) {
+                  console.error('Review fetch error for ' + appId + ': ' + revErr.message);
                 }
 
                 deals.push({
