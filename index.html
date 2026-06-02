@@ -12,9 +12,10 @@
         }
         .header { text-align: center; margin-bottom: 30px; }
         input {
-            padding: 10px; width: 300px; border-radius: 5px;
+            padding: 10px; width: 220px; border-radius: 5px;
             border: none; background: #2a475e; color: white; font-size: 14px; margin: 5px;
         }
+        .small-input { width: 50px; text-align: center; text-transform: uppercase; }
         button {
             padding: 10px 20px; border-radius: 5px; border: none;
             background: #66c0f4; color: #1b2838; font-weight: bold; cursor: pointer; font-size: 16px;
@@ -46,9 +47,10 @@
 
     <div class="header">
         <h1>🎮 Mi Wishlist en Oferta</h1>
-        <p>Introduce tus datos para buscar ofertas sin bloqueos.</p>
-        <input type="text" id="steamIdInput" value="76561198043893385" placeholder="Tu Steam64 ID">
+        <p>Configurá tu país para ver precios locales reales.</p>
+        <input type="text" id="steamIdInput" placeholder="Tu Steam64 ID">
         <input type="text" id="apiKeyInput" placeholder="Tu Steam Web API Key">
+        <input type="text" id="countryInput" class="small-input" value="ar" title="Código de país (ej: ar, us, es)">
         <br><br>
         <button onclick="startTracking()">Buscar Ofertas</button>
     </div>
@@ -62,7 +64,12 @@
     <script>
         const WORKER_URL = "https://steamdeals.mozz05.workers.dev/"; 
         
-        // Función para dividir arrays en lotes (chunks)
+        window.onload = function() {
+            if (localStorage.getItem('steamId')) document.getElementById('steamIdInput').value = localStorage.getItem('steamId');
+            if (localStorage.getItem('steamApiKey')) document.getElementById('apiKeyInput').value = localStorage.getItem('steamApiKey');
+            if (localStorage.getItem('steamCountry')) document.getElementById('countryInput').value = localStorage.getItem('steamCountry');
+        };
+
         function chunkArray(array, size) {
             const result = [];
             for (let i = 0; i < array.length; i += size) {
@@ -74,10 +81,7 @@
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
-            
-            // Guardamos la API Key y el ID en la memoria del navegador para la próxima vez
-            if (apiKey) localStorage.setItem('steamApiKey', apiKey);
-            if (steamId) localStorage.setItem('steamId', steamId);
+            const cc = document.getElementById('countryInput').value.toLowerCase() || 'us';
             const resultsDiv = document.getElementById('results');
             const statusDiv = document.getElementById('status');
             const progressBar = document.getElementById('progress-bar');
@@ -88,14 +92,17 @@
                 return;
             }
 
+            localStorage.setItem('steamId', steamId);
+            localStorage.setItem('steamApiKey', apiKey);
+            localStorage.setItem('steamCountry', cc);
+
             resultsDiv.innerHTML = '';
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             progressBar.innerText = '0%';
-            statusDiv.innerText = 'Obteniendo tu wishlist de Steam...';
+            statusDiv.innerText = 'Obteniendo tu wishlist...';
 
             try {
-                // 1. Obtenemos la lista completa de IDs
                 const wishlistUrl = `${WORKER_URL}?mode=wishlist&steamid=${steamId}&apikey=${apiKey}`;
                 const wishlistRes = await fetch(wishlistUrl);
                 
@@ -109,9 +116,8 @@
                     return;
                 }
 
-                statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en lotes...`;
+                statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
-                // 2. Dividimos en lotes de 20 juegos para no saturar Cloudflare
                 const lotes = chunkArray(appIds, 20);
                 let totalDeals = 0;
 
@@ -122,30 +128,39 @@
                     progressBar.innerText = porcentaje + '%';
                     statusDiv.innerText = `Analizando lote ${i + 1} de ${lotes.length}...`;
 
-                    // 3. Pedimos las ofertas al Worker para este lote
-                    const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lote.join(',')}`;
+                    const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lote.join(',')}&cc=${cc}`;
                     const dealsRes = await fetch(dealsUrl);
                     
                     if (dealsRes.ok) {
                         const deals = await dealsRes.json();
                         
-                        // 4. Pintamos los resultados de este lote
                         deals.forEach(deal => {
                             totalDeals++;
-                            const isLowest = parseFloat(deal.steamPrice) <= parseFloat(deal.lowestEver);
+                            
+                            const curr = deal.currency;
+                            let lowestText = "";
+                            let isLowest = false;
+
+                            // LÓGICA DE ESTRELLITA PORCENTUAL
+                            if (deal.maxDiscountUs !== null) {
+                                // Si mi descuento actual es mayor o igual al máximo histórico de EE.UU.
+                                if (deal.discount >= deal.maxDiscountUs) {
+                                    isLowest = true;
+                                }
+                                lowestText = `Máximo descuento histórico (EE.UU.): ${deal.maxDiscountUs}% (Mínimo USD: $${deal.lowestEverUsd}) ${isLowest ? '⭐ ¡ESTE ES EL MÍNIMO HISTÓRICO!' : ''}`;
+                            } else {
+                                lowestText = `Mínimo histórico: No disponible en CheapShark`;
+                            }
 
                             const card = document.createElement('div');
                             card.className = 'card';
                             card.innerHTML = `
                                 <div class="game-info">
                                     <div class="game-title">${deal.name}</div>
-                                    <span class="original-price">$${deal.originalPrice}</span>
-                                    <span class="price-tag">$${deal.steamPrice}</span>
+                                    <span class="original-price">${curr} $${deal.originalPrice}</span>
+                                    <span class="price-tag">${curr} $${deal.steamPrice}</span>
                                     <span>(-${deal.discount}%)</span>
-                                    <div class="lowest">
-                                        Mínimo histórico: $${deal.lowestEver} 
-                                        ${isLowest ? '⭐ ¡ES EL MÍNIMO HISTÓRICO!' : ''}
-                                    </div>
+                                    <div class="lowest">${lowestText}</div>
                                 </div>
                                 <div class="chart-container">
                                     <canvas id="chart-${deal.appId}"></canvas>
@@ -153,11 +168,9 @@
                             `;
                             resultsDiv.appendChild(card);
 
-                            createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEver, deal.originalPrice);
+                            createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, curr, deal.discount, deal.maxDiscountUs);
                         });
                     }
-                    
-                    // Pausa entre lotes para no saturar
                     if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
                 }
 
@@ -170,22 +183,26 @@
             }
         }
 
-        function createTimelineChart(appId, name, currentPrice, lowestPrice, originalPrice) {
+        function createTimelineChart(appId, name, currentPrice, lowestPriceUsd, originalPrice, currency, currentDiscount, maxDiscountUs) {
             const ctx = document.getElementById(`chart-${appId}`).getContext('2d');
-            const labels = ['Lanzamiento', 'Rebaja Anterior', 'Mínimo Histórico', 'Precio Actual'];
+            
+            // Simulamos la línea de tiempo basada en los porcentajes
+            const safeLowest = lowestPriceUsd !== null ? parseFloat(lowestPriceUsd) : null;
+            
+            // Puntos para el gráfico. Si no hay dato de CS, usamos el precio actual como mínimo aproximado.
             const dataPoints = [
                 parseFloat(originalPrice), 
-                (parseFloat(originalPrice) + parseFloat(lowestPrice)) / 2, 
-                parseFloat(lowestPrice), 
+                safeLowest !== null ? (parseFloat(originalPrice) + safeLowest) / 1.5 : parseFloat(currentPrice) * 1.2, 
+                safeLowest !== null ? safeLowest : parseFloat(currentPrice), 
                 parseFloat(currentPrice)
             ];
 
             new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: labels,
+                    labels: ['Lanzamiento', 'Rebaja Anterior', 'Mínimo Histórico', 'Hoy'],
                     datasets: [{
-                        label: 'Precio (USD)', data: dataPoints,
+                        label: `Precio`, data: dataPoints,
                         borderColor: '#66c0f4', backgroundColor: 'rgba(102, 192, 244, 0.1)',
                         fill: true, tension: 0.3
                     }]
