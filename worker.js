@@ -3,6 +3,11 @@ export default {
     const url = new URL(request.url);
     const mode = url.searchParams.get('mode');
 
+    // Headers para Cheapshark (requiere User-Agent descriptivo)
+    const CS_HEADERS = {
+      'User-Agent': 'WishlistDeals/1.0 (github.com/MozzVader/SteamDeals)'
+    };
+
     if (mode === 'wishlist') {
       const steamId = url.searchParams.get('steamid');
       const apiKey = url.searchParams.get('apikey');
@@ -52,7 +57,7 @@ export default {
                 // 1) Buscar gameID interno en Cheapshark
                 try {
                   const csSearchUrl = `https://www.cheapshark.com/api/1.0/games?steamAppID=${appId}&limit=1`;
-                  const csSearchRes = await fetch(csSearchUrl);
+                  const csSearchRes = await fetch(csSearchUrl, { headers: CS_HEADERS });
                   if (csSearchRes.ok) {
                     const csSearchData = await csSearchRes.json();
                     if (csSearchData.length > 0 && csSearchData[0].gameID) {
@@ -60,7 +65,7 @@ export default {
 
                       // 2) Obtener precio historico con gameID
                       const csGameUrl = `https://www.cheapshark.com/api/1.0/games?id=${csGameId}`;
-                      const csGameRes = await fetch(csGameUrl);
+                      const csGameRes = await fetch(csGameUrl, { headers: CS_HEADERS });
                       if (csGameRes.ok) {
                         const csGameData = await csGameRes.json();
 
@@ -83,7 +88,6 @@ export default {
                     }
                   }
                 } catch (csErr) {
-                  // Si Cheapshark falla, seguimos sin dato historico
                   console.error("CheapShark error for " + appId + ": " + csErr.message);
                 }
 
@@ -107,40 +111,6 @@ export default {
       }
 
       return new Response(JSON.stringify(deals), {
-        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
-      });
-    }
-
-    // DEBUG: para probar si Cheapshark funciona desde el Worker
-    if (mode === 'debug') {
-      const appId = url.searchParams.get('appid') || '232430';
-      const result = {};
-
-      try {
-        const csSearchUrl = `https://www.cheapshark.com/api/1.0/games?steamAppID=${appId}&limit=1`;
-        const csSearchRes = await fetch(csSearchUrl);
-        result.searchStatus = csSearchRes.status;
-        result.searchOk = csSearchRes.ok;
-        result.searchBody = (await csSearchRes.text()).substring(0, 500);
-
-        if (csSearchRes.ok) {
-          const csSearchData = await csSearchRes.json();
-          if (csSearchData.length > 0) {
-            const csGameId = csSearchData[0].gameID;
-            result.gameId = csGameId;
-
-            const csGameUrl = `https://www.cheapshark.com/api/1.0/games?id=${csGameId}`;
-            const csGameRes = await fetch(csGameUrl);
-            result.gameStatus = csGameRes.status;
-            result.gameOk = csGameRes.ok;
-            result.gameBody = (await csGameRes.text()).substring(0, 800);
-          }
-        }
-      } catch (err) {
-        result.error = err.message;
-      }
-
-      return new Response(JSON.stringify(result, null, 2), {
         headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
       });
     }
