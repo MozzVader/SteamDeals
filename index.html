@@ -3,67 +3,295 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Steam Wishlist Tracker</title>
+    <title>WishlistDeals</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* ── Reset & Base ── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0a0a0a;
+            --bg-raised: #111111;
+            --bg-input: #161616;
+            --fg: #e0e0e0;
+            --fg-dim: #777777;
+            --accent: #00E205;
+            --accent-dim: rgba(0, 226, 5, 0.12);
+            --accent-glow: rgba(0, 226, 5, 0.25);
+            --border: #222222;
+            --danger: #ff4444;
+            --warn: #f0ad4e;
+            --blue: #66c0f4;
+            --font: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
         body {
-            background-color: #1b2838; color: #c7d5e0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px;
+            background-color: var(--bg);
+            /* Dot grid 40px */
+            background-image: radial-gradient(circle, #1a1a1a 1px, transparent 1px);
+            background-size: 40px 40px;
+            color: var(--fg);
+            font-family: var(--font);
+            min-height: 100vh;
         }
-        .header { text-align: center; margin-bottom: 30px; }
+
+        /* ── Header ── */
+        .header {
+            background: var(--bg-raised);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            user-select: none;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+        }
+
+        .brand-text {
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+
+        .brand-wishlist { color: #ffffff; }
+        .brand-deals    { color: var(--accent); }
+
+        .brand-sub {
+            color: var(--fg-dim);
+            font-size: 0.85rem;
+            margin-top: -8px;
+        }
+
+        /* ── Config row ── */
+        .config-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
         input {
-            padding: 10px; width: 220px; border-radius: 5px;
-            border: none; background: #2a475e; color: white; font-size: 14px; margin: 5px;
+            padding: 10px 14px;
+            border-radius: 0;
+            border: 1px solid var(--border);
+            background: var(--bg-input);
+            color: var(--fg);
+            font-size: 14px;
+            font-family: var(--font);
+            outline: none;
+            transition: border-color 0.2s;
         }
-        .small-input { width: 50px; text-align: center; text-transform: uppercase; }
+
+        input:focus {
+            border-color: var(--accent);
+        }
+
+        input::placeholder {
+            color: var(--fg-dim);
+        }
+
+        .small-input {
+            width: 54px;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
         button {
-            padding: 10px 20px; border-radius: 5px; border: none;
-            background: #66c0f4; color: #1b2838; font-weight: bold; cursor: pointer; font-size: 16px;
+            padding: 10px 24px;
+            border-radius: 0;
+            border: none;
+            background: var(--accent);
+            color: #000;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 15px;
+            font-family: var(--font);
+            transition: background 0.2s, box-shadow 0.2s;
         }
-        button:hover { background: #a4d007; }
-        a { color: #a4d007; }
-        .card {
-            background: #2a475e; border-radius: 8px; padding: 15px;
-            margin-bottom: 20px; display: flex; gap: 20px; align-items: center;
+
+        button:hover {
+            background: #00ff06;
+            box-shadow: 0 0 12px var(--accent-glow);
         }
-        .game-info { flex: 1; }
-        .game-title { color: #66c0f4; font-size: 1.2rem; font-weight: bold; }
-        .price-tag { font-size: 1.5rem; color: #a4d007; }
-        .original-price { text-decoration: line-through; color: #626366; font-size: 1rem; }
-        .discount-info { color: #f0ad4e; font-size: 0.9rem; margin-top: 5px; }
-        .chart-container { flex: 1; min-width: 300px; height: 150px; }
-        #status { text-align: center; color: #66c0f4; font-style: italic; margin-bottom: 10px; font-size: 1.1rem; }
+
+        /* ── Main content ── */
+        .main {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px 20px 60px;
+        }
+
+        #status {
+            text-align: center;
+            color: var(--fg-dim);
+            font-style: italic;
+            margin-bottom: 14px;
+            font-size: 0.95rem;
+        }
+
+        /* ── Progress bar ── */
         .progress-container {
-            width: 80%; background-color: #2a475e; border-radius: 10px;
-            margin: 0 auto 20px auto; overflow: hidden;
+            width: 100%;
+            background-color: var(--bg-raised);
+            border: 1px solid var(--border);
+            border-radius: 0;
+            margin: 0 auto 20px auto;
+            overflow: hidden;
+            height: 22px;
         }
+
         .progress-bar {
-            height: 20px; background-color: #a4d007; width: 0%;
-            transition: width 0.3s ease; text-align: center; font-size: 12px; line-height: 20px; color: black; font-weight: bold;
+            height: 100%;
+            background-color: var(--accent);
+            width: 0%;
+            transition: width 0.3s ease;
+            text-align: center;
+            font-size: 12px;
+            line-height: 22px;
+            color: #000;
+            font-weight: 700;
+        }
+
+        /* ── Card ── */
+        .card {
+            background: var(--bg-raised);
+            border: 1px solid var(--border);
+            border-radius: 0;
+            padding: 16px 20px;
+            margin-bottom: 14px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            transition: border-color 0.2s;
+        }
+
+        .card:hover {
+            border-color: var(--accent);
+        }
+
+        .game-info { flex: 1; }
+
+        .game-title {
+            color: var(--fg);
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .price-tag {
+            font-size: 1.4rem;
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .original-price {
+            text-decoration: line-through;
+            color: var(--fg-dim);
+            font-size: 0.95rem;
+            margin-right: 8px;
+        }
+
+        .discount-badge {
+            font-size: 0.9rem;
+            color: var(--warn);
+            font-weight: 600;
+        }
+
+        .discount-info {
+            color: var(--fg-dim);
+            font-size: 0.85rem;
+            margin-top: 6px;
+        }
+
+        .lowest-highlight {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        /* ── Chart ── */
+        .chart-container {
+            flex: 1;
+            min-width: 280px;
+            height: 140px;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .card {
+                flex-direction: column;
+                gap: 12px;
+            }
+            .chart-container {
+                min-width: 100%;
+                width: 100%;
+            }
+            .config-row {
+                flex-direction: column;
+                width: 100%;
+            }
+            .config-row input {
+                width: 100%;
+            }
+            .config-row .small-input {
+                width: 100%;
+            }
+            .brand-text {
+                font-size: 1.3rem;
+            }
         }
     </style>
 </head>
 <body>
 
+    <!-- Header -->
     <div class="header">
-        <h1>🎮 Mi Wishlist en Oferta</h1>
-        <p>Configurá tu país para ver precios locales reales.</p>
-        <input type="text" id="steamIdInput" placeholder="Tu Steam64 ID">
-        <input type="text" id="apiKeyInput" placeholder="Tu Steam Web API Key">
-        <input type="text" id="countryInput" class="small-input" value="ar" title="Código de país (ej: ar, us, es)">
-        <br><br>
-        <button onclick="startTracking()">Buscar Ofertas</button>
+        <a class="brand" href="#">
+            <svg class="brand-icon" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="10" width="14" height="18" rx="2" stroke="#00E205" stroke-width="2.5"/>
+                <rect x="20" y="10" width="14" height="18" rx="2" stroke="#00E205" stroke-width="2.5"/>
+                <path d="M9 18L13 21L9 24" stroke="#00E205" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="27" cy="20" r="2.5" fill="#00E205"/>
+            </svg>
+            <span class="brand-text">
+                <span class="brand-wishlist">WISHLIST</span><span class="brand-deals">DEALS</span>
+            </span>
+        </a>
+        <p class="brand-sub">Buscá el mejor precio para los juegos de tu wishlist</p>
+
+        <div class="config-row">
+            <input type="text" id="steamIdInput" placeholder="Tu Steam64 ID">
+            <input type="text" id="apiKeyInput" placeholder="Tu Steam Web API Key">
+            <input type="text" id="countryInput" class="small-input" value="ar" title="Código de país (ej: ar, us, es)">
+            <button onclick="startTracking()">Buscar Ofertas</button>
+        </div>
     </div>
-    
-    <div id="status"></div>
-    <div class="progress-container" id="progress-container" style="display: none;">
-        <div class="progress-bar" id="progress-bar">0%</div>
+
+    <!-- Content -->
+    <div class="main">
+        <div id="status"></div>
+        <div class="progress-container" id="progress-container" style="display: none;">
+            <div class="progress-bar" id="progress-bar">0%</div>
+        </div>
+        <div id="results"></div>
     </div>
-    <div id="results"></div>
 
     <script>
         const WORKER_URL = "https://steamdeals.mozz05.workers.dev/"; 
-        
+
         window.onload = function() {
             if (localStorage.getItem('steamId')) document.getElementById('steamIdInput').value = localStorage.getItem('steamId');
             if (localStorage.getItem('steamApiKey')) document.getElementById('apiKeyInput').value = localStorage.getItem('steamApiKey');
@@ -86,9 +314,9 @@
             const statusDiv = document.getElementById('status');
             const progressBar = document.getElementById('progress-bar');
             const progressContainer = document.getElementById('progress-container');
-            
+
             if (!steamId || !apiKey) {
-                statusDiv.innerText = "⚠️ Por favor, introduce tu Steam ID y tu API Key.";
+                statusDiv.innerText = "⚠️ Ingresá tu Steam ID y tu API Key para continuar.";
                 return;
             }
 
@@ -105,11 +333,11 @@
             try {
                 const wishlistUrl = `${WORKER_URL}?mode=wishlist&steamid=${steamId}&apikey=${apiKey}`;
                 const wishlistRes = await fetch(wishlistUrl);
-                
+
                 if (!wishlistRes.ok) throw new Error("Error obteniendo la wishlist.");
-                
+
                 const appIds = await wishlistRes.json();
-                
+
                 if (appIds.length === 0) {
                     statusDiv.innerText = "Wishlist vacía o perfil privado.";
                     progressContainer.style.display = 'none';
@@ -118,7 +346,6 @@
 
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
-                // LOTES DE 10 PARA NO MATAR A CLOUDFLARE
                 const lotes = chunkArray(appIds, 10);
                 let totalDeals = 0;
 
@@ -131,24 +358,24 @@
 
                     const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lote.join(',')}&cc=${cc}`;
                     const dealsRes = await fetch(dealsUrl);
-                    
+
                     if (dealsRes.ok) {
                         const deals = await dealsRes.json();
-                        
+
                         deals.forEach(deal => {
                             totalDeals++;
-                            
+
                             const curr = deal.currency;
                             let discountText = "";
                             let isLowest = false;
 
-                            // LÓGICA DE "MEJOR DESCUENTO HISTÓRICO"
                             if (deal.maxDiscountUs !== null) {
-                                // Si mi descuento actual es mayor o igual al histórico de EE.UU.
                                 if (deal.discount >= deal.maxDiscountUs) {
                                     isLowest = true;
                                 }
-                                discountText = `Mejor descuento histórico: ${deal.maxDiscountUs}% ${isLowest ? '⭐ ¡NUNCA ESTUVO TAN BARATO!' : ''}`;
+                                discountText = isLowest
+                                    ? `Mejor descuento histórico: ${deal.maxDiscountUs}% — <span class="lowest-highlight">NUNCA ESTUVO TAN BARATO</span>`
+                                    : `Mejor descuento histórico: ${deal.maxDiscountUs}%`;
                             } else {
                                 discountText = `Descuento histórico: No disponible`;
                             }
@@ -160,7 +387,7 @@
                                     <div class="game-title">${deal.name}</div>
                                     <span class="original-price">${curr} $${deal.originalPrice}</span>
                                     <span class="price-tag">${curr} $${deal.steamPrice}</span>
-                                    <span>(-${deal.discount}%)</span>
+                                    <span class="discount-badge">-${deal.discount}%</span>
                                     <div class="discount-info">${discountText}</div>
                                 </div>
                                 <div class="chart-container">
@@ -175,10 +402,12 @@
                     if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
                 }
 
-                statusDiv.innerText = totalDeals > 0 ? `✅ Búsqueda completada. Encontrados ${totalDeals} juegos en oferta.` : '❌ Búsqueda completada. Ningún juego está en oferta ahora mismo.';
+                statusDiv.innerText = totalDeals > 0
+                    ? `Búsqueda completada. ${totalDeals} juegos en oferta.`
+                    : 'Búsqueda completada. Ningún juego está en oferta ahora mismo.';
 
             } catch (error) {
-                statusDiv.innerHTML = `<span style="color: #ff0000;">Error: ${error.message}</span>`;
+                statusDiv.innerHTML = `<span style="color: var(--danger);">Error: ${error.message}</span>`;
                 console.error(error);
                 progressContainer.style.display = 'none';
             }
@@ -186,14 +415,13 @@
 
         function createTimelineChart(appId, name, currentPrice, lowestPriceUsd, originalPrice, currency, currentDiscount, maxDiscountUs) {
             const ctx = document.getElementById(`chart-${appId}`).getContext('2d');
-            
+
             const safeLowest = lowestPriceUsd !== null ? parseFloat(lowestPriceUsd) : null;
-            
-            // Simulamos la línea de tiempo basada en los descuentos
+
             const dataPoints = [
-                parseFloat(originalPrice), 
-                safeLowest !== null ? (parseFloat(originalPrice) + safeLowest) / 1.5 : parseFloat(currentPrice) * 1.2, 
-                safeLowest !== null ? safeLowest : parseFloat(currentPrice), 
+                parseFloat(originalPrice),
+                safeLowest !== null ? (parseFloat(originalPrice) + safeLowest) / 1.5 : parseFloat(currentPrice) * 1.2,
+                safeLowest !== null ? safeLowest : parseFloat(currentPrice),
                 parseFloat(currentPrice)
             ];
 
@@ -202,17 +430,30 @@
                 data: {
                     labels: ['Lanzamiento', 'Rebaja Anterior', 'Mínimo Histórico', 'Hoy'],
                     datasets: [{
-                        label: `Precio`, data: dataPoints,
-                        borderColor: '#66c0f4', backgroundColor: 'rgba(102, 192, 244, 0.1)',
-                        fill: true, tension: 0.3
+                        label: 'Precio',
+                        data: dataPoints,
+                        borderColor: '#00E205',
+                        backgroundColor: 'rgba(0, 226, 5, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointBackgroundColor: '#00E205',
+                        pointBorderColor: '#00E205',
+                        pointRadius: 3
                     }]
                 },
                 options: {
-                    responsive: true, maintainAspectRatio: false,
+                    responsive: true,
+                    maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        y: { ticks: { color: '#c7d5e0', callback: v => '$' + v }, grid: { color: '#3d5575' } },
-                        x: { ticks: { color: '#c7d5e0' }, grid: { color: '#3d5575' } }
+                        y: {
+                            ticks: { color: '#777', callback: v => '$' + v },
+                            grid: { color: '#1a1a1a' }
+                        },
+                        x: {
+                            ticks: { color: '#777' },
+                            grid: { color: '#1a1a1a' }
+                        }
                     }
                 }
             });
