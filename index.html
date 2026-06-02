@@ -78,7 +78,7 @@
             flex-wrap: nowrap;
         }
 
-        input {
+        input, select {
             padding: 10px 14px;
             border-radius: 0;
             border: 1px solid var(--border);
@@ -90,12 +90,28 @@
             transition: border-color 0.2s;
         }
 
-        input:focus {
+        input:focus, select:focus {
             border-color: var(--accent);
         }
 
         input::placeholder {
             color: var(--fg-dim);
+        }
+
+        select {
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%23777' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+
+        select option {
+            background: var(--bg-input);
+            color: var(--fg);
         }
 
         .small-input {
@@ -158,6 +174,45 @@
             font-size: 12px;
             line-height: 22px;
             color: #000;
+            font-weight: 700;
+        }
+
+        /* ── Toolbar (filters & sort) ── */
+        .toolbar {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .toolbar.visible {
+            display: flex;
+        }
+
+        .toolbar input[type="text"] {
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .toolbar input[type="number"] {
+            width: 72px;
+            text-align: center;
+        }
+
+        .toolbar select {
+            width: 200px;
+        }
+
+        .toolbar-count {
+            color: var(--fg-dim);
+            font-size: 0.85rem;
+            white-space: nowrap;
+            flex-shrink: 0;
+            padding: 0 4px;
+        }
+
+        .toolbar-count strong {
+            color: var(--accent);
             font-weight: 700;
         }
 
@@ -237,6 +292,14 @@
             height: 140px;
         }
 
+        /* ── No results ── */
+        .no-results {
+            text-align: center;
+            color: var(--fg-dim);
+            padding: 40px 20px;
+            font-size: 1rem;
+        }
+
         /* ── Responsive ── */
         @media (max-width: 900px) {
             .header {
@@ -273,6 +336,23 @@
             button {
                 width: 100%;
             }
+            .toolbar {
+                flex-wrap: wrap;
+            }
+            .toolbar input[type="text"] {
+                min-width: 100%;
+            }
+            .toolbar select {
+                flex: 1;
+                min-width: 120px;
+            }
+            .toolbar input[type="number"] {
+                flex: 0 0 72px;
+            }
+            .toolbar-count {
+                width: 100%;
+                text-align: center;
+            }
         }
     </style>
 </head>
@@ -306,16 +386,37 @@
         <div class="progress-container" id="progress-container" style="display: none;">
             <div class="progress-bar" id="progress-bar">0%</div>
         </div>
+
+        <!-- Toolbar: search, sort, filter -->
+        <div class="toolbar" id="toolbar">
+            <input type="text" id="searchInput" placeholder="Buscar juego...">
+            <select id="sortSelect">
+                <option value="discount-desc">Mayor descuento</option>
+                <option value="price-asc">Menor precio</option>
+                <option value="name-asc">Nombre A-Z</option>
+                <option value="name-desc">Nombre Z-A</option>
+                <option value="discount-asc">Menor descuento</option>
+                <option value="price-desc">Mayor precio</option>
+            </select>
+            <input type="number" id="minDiscountInput" placeholder="% min" min="0" max="100" title="Descuento mínimo (%)">
+            <span class="toolbar-count" id="toolbar-count"></span>
+        </div>
+
         <div id="results"></div>
     </div>
 
     <script>
-        const WORKER_URL = "https://steamdeals.mozz05.workers.dev/"; 
+        const WORKER_URL = "https://steamdeals.mozz05.workers.dev/";
+        let allDeals = [];
 
         window.onload = function() {
             if (localStorage.getItem('steamId')) document.getElementById('steamIdInput').value = localStorage.getItem('steamId');
             if (localStorage.getItem('steamApiKey')) document.getElementById('apiKeyInput').value = localStorage.getItem('steamApiKey');
             if (localStorage.getItem('steamCountry')) document.getElementById('countryInput').value = localStorage.getItem('steamCountry');
+
+            document.getElementById('searchInput').addEventListener('input', renderDeals);
+            document.getElementById('sortSelect').addEventListener('change', renderDeals);
+            document.getElementById('minDiscountInput').addEventListener('input', renderDeals);
         };
 
         function chunkArray(array, size) {
@@ -334,6 +435,7 @@
             const statusDiv = document.getElementById('status');
             const progressBar = document.getElementById('progress-bar');
             const progressContainer = document.getElementById('progress-container');
+            const toolbar = document.getElementById('toolbar');
 
             if (!steamId || !apiKey) {
                 statusDiv.innerText = "⚠️ Ingresá tu Steam ID y tu API Key para continuar.";
@@ -345,6 +447,8 @@
             localStorage.setItem('steamCountry', cc);
 
             resultsDiv.innerHTML = '';
+            allDeals = [];
+            toolbar.classList.remove('visible');
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             progressBar.innerText = '0%';
@@ -367,7 +471,6 @@
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
                 const lotes = chunkArray(appIds, 10);
-                let totalDeals = 0;
 
                 for (let i = 0; i < lotes.length; i++) {
                     const lote = lotes[i];
@@ -381,64 +484,115 @@
 
                     if (dealsRes.ok) {
                         const deals = await dealsRes.json();
-
-                        deals.forEach(deal => {
-                            totalDeals++;
-
-                            const curr = deal.currency;
-                            let discountText = "";
-                            let isLowest = false;
-
-                            if (deal.maxDiscountUs !== null) {
-                                if (deal.discount >= deal.maxDiscountUs) {
-                                    isLowest = true;
-                                }
-                                discountText = isLowest
-                                    ? `Mejor descuento histórico: ${deal.maxDiscountUs}% — <span class="lowest-highlight">NUNCA ESTUVO TAN BARATO</span>`
-                                    : `Mejor descuento histórico: ${deal.maxDiscountUs}%`;
-                            } else {
-                                discountText = `Descuento histórico: No disponible`;
-                            }
-
-                            const steamUrl = `https://store.steampowered.com/app/${deal.appId}`;
-                            const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${deal.appId}/header.jpg`;
-
-                            const card = document.createElement('a');
-                            card.className = 'card';
-                            card.href = steamUrl;
-                            card.target = '_blank';
-                            card.rel = 'noopener noreferrer';
-                            card.title = `Ver ${deal.name} en Steam`;
-                            card.innerHTML = `
-                                <img class="game-cover" src="${imgUrl}" alt="${deal.name}" loading="lazy">
-                                <div class="game-info">
-                                    <div class="game-title">${deal.name}</div>
-                                    <span class="original-price">${curr} $${deal.originalPrice}</span>
-                                    <span class="price-tag">${curr} $${deal.steamPrice}</span>
-                                    <span class="discount-badge">-${deal.discount}%</span>
-                                    <div class="discount-info">${discountText}</div>
-                                </div>
-                                <div class="chart-container">
-                                    <canvas id="chart-${deal.appId}"></canvas>
-                                </div>
-                            `;
-                            resultsDiv.appendChild(card);
-
-                            createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, curr, deal.discount, deal.maxDiscountUs);
-                        });
+                        allDeals.push(...deals);
                     }
                     if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
                 }
 
-                statusDiv.innerText = totalDeals > 0
-                    ? `Búsqueda completada. ${totalDeals} juegos en oferta.`
-                    : 'Búsqueda completada. Ningún juego está en oferta ahora mismo.';
+                progressContainer.style.display = 'none';
+
+                if (allDeals.length > 0) {
+                    toolbar.classList.add('visible');
+                    document.getElementById('searchInput').value = '';
+                    document.getElementById('sortSelect').value = 'discount-desc';
+                    document.getElementById('minDiscountInput').value = '';
+                    renderDeals();
+                    statusDiv.innerText = '';
+                } else {
+                    statusDiv.innerText = 'Búsqueda completada. Ningún juego está en oferta ahora mismo.';
+                }
 
             } catch (error) {
                 statusDiv.innerHTML = `<span style="color: var(--danger);">Error: ${error.message}</span>`;
                 console.error(error);
                 progressContainer.style.display = 'none';
             }
+        }
+
+        function renderDeals() {
+            const resultsDiv = document.getElementById('results');
+            const search = document.getElementById('searchInput').value.toLowerCase().trim();
+            const sort = document.getElementById('sortSelect').value;
+            const minDiscount = parseInt(document.getElementById('minDiscountInput').value) || 0;
+
+            // Destroy existing charts to avoid memory leaks
+            Chart.helpers.each(Chart.instances, (instance) => {
+                if (instance.canvas.id.startsWith('chart-')) {
+                    instance.destroy();
+                }
+            });
+
+            // Filter
+            let filtered = allDeals.filter(deal => {
+                if (deal.discount < minDiscount) return false;
+                if (search && !deal.name.toLowerCase().includes(search)) return false;
+                return true;
+            });
+
+            // Sort
+            switch (sort) {
+                case 'discount-desc': filtered.sort((a, b) => b.discount - a.discount); break;
+                case 'discount-asc':  filtered.sort((a, b) => a.discount - b.discount); break;
+                case 'price-asc':     filtered.sort((a, b) => parseFloat(a.steamPrice) - parseFloat(b.steamPrice)); break;
+                case 'price-desc':    filtered.sort((a, b) => parseFloat(b.steamPrice) - parseFloat(a.steamPrice)); break;
+                case 'name-asc':      filtered.sort((a, b) => a.name.localeCompare(b.name)); break;
+                case 'name-desc':     filtered.sort((a, b) => b.name.localeCompare(a.name)); break;
+            }
+
+            // Update count
+            document.getElementById('toolbar-count').innerHTML =
+                `<strong>${filtered.length}</strong> de ${allDeals.length} juegos`;
+
+            // Render
+            resultsDiv.innerHTML = '';
+
+            if (filtered.length === 0) {
+                resultsDiv.innerHTML = '<div class="no-results">No se encontraron juegos con esos filtros.</div>';
+                return;
+            }
+
+            filtered.forEach(deal => {
+                const curr = deal.currency;
+                let discountText = "";
+                let isLowest = false;
+
+                if (deal.maxDiscountUs !== null) {
+                    if (deal.discount >= deal.maxDiscountUs) {
+                        isLowest = true;
+                    }
+                    discountText = isLowest
+                        ? `Mejor descuento histórico: ${deal.maxDiscountUs}% — <span class="lowest-highlight">NUNCA ESTUVO TAN BARATO</span>`
+                        : `Mejor descuento histórico: ${deal.maxDiscountUs}%`;
+                } else {
+                    discountText = `Descuento histórico: No disponible`;
+                }
+
+                const steamUrl = `https://store.steampowered.com/app/${deal.appId}`;
+                const imgUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${deal.appId}/header.jpg`;
+
+                const card = document.createElement('a');
+                card.className = 'card';
+                card.href = steamUrl;
+                card.target = '_blank';
+                card.rel = 'noopener noreferrer';
+                card.title = `Ver ${deal.name} en Steam`;
+                card.innerHTML = `
+                    <img class="game-cover" src="${imgUrl}" alt="${deal.name}" loading="lazy">
+                    <div class="game-info">
+                        <div class="game-title">${deal.name}</div>
+                        <span class="original-price">${curr} $${deal.originalPrice}</span>
+                        <span class="price-tag">${curr} $${deal.steamPrice}</span>
+                        <span class="discount-badge">-${deal.discount}%</span>
+                        <div class="discount-info">${discountText}</div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart-${deal.appId}"></canvas>
+                    </div>
+                `;
+                resultsDiv.appendChild(card);
+
+                createTimelineChart(deal.appId, deal.name, deal.steamPrice, deal.lowestEverUsd, deal.originalPrice, curr, deal.discount, deal.maxDiscountUs);
+            });
         }
 
         function createTimelineChart(appId, name, currentPrice, lowestPriceUsd, originalPrice, currency, currentDiscount, maxDiscountUs) {
