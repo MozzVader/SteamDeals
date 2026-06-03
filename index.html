@@ -2193,28 +2193,74 @@
 
             try {
                 // ══════════════════════════════════════════════════════════════
-                // FAST PATH: Wishlistdata (1 request → toda la wishlist)
-                // Igual que Augmented Steam: obtiene todos los juegos con
-                // precios y descuentos en una sola llamada a Steam.
+                // FASTEST PATH: Direct browser fetch de wishlistdata
+                // Augmented Steam funciona porque hace ESTO desde el browser.
+                // Si Steam permite CORS en este endpoint, obtenemos todo en 1
+                // request desde la IP del usuario (nunca bloqueada). Si CORS
+                // bloquea, caemos al worker (que será bloqueado por Steam).
                 // ══════════════════════════════════════════════════════════════
-                const wlDataUrl = `${WORKER_URL}?mode=wishlistdata&steamid=${steamId}&cc=${cc}`;
-                const wlDataRes = await fetch(wlDataUrl);
-                let fastPath = false;
-
-                // Leer respuesta una sola vez (el body solo se puede consumir una vez)
                 let wlDataBody = null;
                 let wlBlocked = false;
-                if (wlDataRes.ok) {
-                    wlDataBody = await wlDataRes.json();
-                } else if (wlDataRes.status === 503) {
-                    // Steam bloqueó la request (302 redirect desde IP de cloud)
-                    try {
-                        const errData = await wlDataRes.json();
-                        if (errData.blocked) {
-                            wlBlocked = true;
-                            console.warn('Steam bloqueó wishlistdata:', errData.error);
+                let directSuccess = false;
+
+                try {
+                    const directUrl = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/`;
+                    const directRes = await fetch(directUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json, text/javascript, */*; q=0.01',
+                        },
+                        credentials: 'omit'
+                    });
+
+                    if (directRes.ok) {
+                        const raw = await directRes.text();
+                        // Verificar que es JSON y no HTML redirect
+                        if (!raw.trim().startsWith('<')) {
+                            const parsed = JSON.parse(raw);
+                            const games = [];
+                            for (const [appId, info] of Object.entries(parsed)) {
+                                games.push({
+                                    appId,
+                                    name: info.name || '',
+                                    discount_percent: info.discount_percent || 0,
+                                    original_price: info.original_price || 0,
+                                    final_price: info.final_price || 0,
+                                    currency: info.currency || 'USD'
+                                });
+                            }
+                            if (games.length > 0) {
+                                wlDataBody = { totalGames: games.length, games };
+                                directSuccess = true;
+                                console.log(`Direct browser fetch OK: ${games.length} juegos`);
+                            }
                         }
-                    } catch(e) {}
+                    } else {
+                        console.log(`Direct fetch: HTTP ${directRes.status} (CORS o bloqueado)`);
+                    }
+                } catch (directErr) {
+                    // CORS block, network error, etc. → normal, caemos al worker
+                    console.log(`Direct fetch falló (esperado si CORS bloquea):`, directErr.message);
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // WORKER PATH: Si el direct fetch no funcionó, intentar vía worker
+                // ══════════════════════════════════════════════════════════════
+                if (!directSuccess) {
+                    const wlDataUrl = `${WORKER_URL}?mode=wishlistdata&steamid=${steamId}&cc=${cc}`;
+                    const wlDataRes = await fetch(wlDataUrl);
+
+                    if (wlDataRes.ok) {
+                        wlDataBody = await wlDataRes.json();
+                    } else if (wlDataRes.status === 503) {
+                        try {
+                            const errData = await wlDataRes.json();
+                            if (errData.blocked) {
+                                wlBlocked = true;
+                                console.warn('Steam bloqueó wishlistdata:', errData.error);
+                            }
+                        } catch(e) {}
+                    }
                 }
 
                 if (wlBlocked) {
