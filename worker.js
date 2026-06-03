@@ -82,11 +82,14 @@ export default {
         const verifyText = await verifyRes.text();
 
         if (verifyText.includes('is_valid:true')) {
-          // Extraer steamid del claimed_id
-          const match = rawSearch.match(/openid\.claimed_id=.*?\/id\/(\d+)/);
-          if (match) {
-            const steamId = match[1];
-            return Response.redirect(`${FRONTEND_URL}?steamid=${steamId}`, 302);
+          // Extraer steamid del claimed_id (puede estar URL-encoded con %2F)
+          const claimed = rawSearch.match(/openid\.claimed_id=([^&]+)/);
+          if (claimed) {
+            const decoded = decodeURIComponent(claimed[1]);
+            const match = decoded.match(/\/id\/(\d+)/);
+            if (match) {
+              return Response.redirect(`${FRONTEND_URL}?steamid=${match[1]}`, 302);
+            }
           }
         }
 
