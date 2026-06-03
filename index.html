@@ -1854,12 +1854,33 @@
                         <h4 style="color:var(--blue);font-size:0.95rem;margin-bottom:6px;">
                             <i class="fa-solid fa-key" style="margin-right:4px;"></i> Opción 2: API Key (más lento, puede tener rate limiting)
                         </h4>
-                        <p style="font-size:0.85rem;">Ingresá tu Steam API Key en el campo de arriba y presioná el botón. Este método obtiene tu wishlist pero necesita consultar cada juego individualmente, lo que puede tardar más y perder algunos resultados por rate limiting de Steam.</p>
+                        <p style="font-size:0.85rem;">Ingresá tu Steam API Key en el campo de arriba y presioná el botón de abajo. Este método obtiene tu wishlist pero necesita consultar cada juego individualmente.</p>
+                        <div class="import-actions" style="margin-top:8px;">
+                            <button class="btn-secondary" id="fallbackApiKeyBtn" style="border-color:var(--blue);color:var(--blue);">
+                                <i class="fa-solid fa-key" style="margin-right:4px;"></i> Buscar con API Key
+                            </button>
+                        </div>
+                        <div id="fallbackKeyError" class="import-error" style="display:none;"></div>
                     </div>
                 </div>
             `;
             // Scroll to import panel
             panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Handler para botón de fallback con API Key
+            document.getElementById('fallbackApiKeyBtn').addEventListener('click', () => {
+                const key = document.getElementById('apiKeyInput').value.trim();
+                const errEl = document.getElementById('fallbackKeyError');
+                if (!key) {
+                    errEl.textContent = 'Pegá tu API Key en el campo de arriba primero.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                errEl.style.display = 'none';
+                hideImportPanel();
+                // Ejecutar startTracking — ahora tiene API key y wlBlocked=true, así que cae al fallback
+                startTracking();
+            });
         }
 
         function hideImportPanel() {
@@ -1871,9 +1892,11 @@
         }
 
         // ── Parse imported JSON (Augmented Steam format) ──
-        // Soporta dos formatos:
-        // 1) Objeto: { "12345": { "name": "...", "discount": 50, ... }, ... }
+        // Soporta múltiples formatos:
+        // 1) Objeto plano: { "12345": { "name": "...", "discount": 50, ... }, ... }
         // 2) Array: [ { "appid": 12345, "name": "...", ... }, ... ]
+        // 3) Wrapper: { "data": { "12345": { ... } } } o { "wishlist": { ... } }
+        // 4) Wrapper: { "data": [ { ... } ] } o { "wishlist": [ ... ] }
         function parseImportedJson(jsonStr) {
             let data;
             try {
@@ -1882,36 +1905,70 @@
                 return { error: 'JSON inválido. Verificá que hayas copiado todo el JSON correctamente.' };
             }
 
-            // Normalizar a array
-            let games = [];
-            if (Array.isArray(data)) {
-                games = data;
-            } else if (typeof data === 'object' && data !== null) {
-                // Objeto: las keys son appIds
-                for (const [key, value] of Object.entries(data)) {
-                    if (value && typeof value === 'object') {
-                        // Agregar el appId como campo
-                        games.push({ ...value, appid: value.appid || parseInt(key) || key });
+            // Buscar games recursivamente si hay wrappers
+            function extractGames(obj) {
+                if (Array.isArray(obj)) return obj;
+                if (typeof obj !== 'object' || obj === null) return [];
+
+                // Si es un objeto donde TODAS las keys son numéricas → es el formato
+                // directo de Augmented Steam (keys = appIds)
+                const keys = Object.keys(obj);
+                const numericKeys = keys.filter(k => /^\d+$/.test(k));
+
+                if (numericKeys.length > 1 && numericKeys.length >= keys.length * 0.8) {
+                    // Más del 80% de keys son numéricas → formato directo
+                    const games = [];
+                    for (const [key, value] of Object.entries(obj)) {
+                        if (value && typeof value === 'object' && value.name) {
+                            games.push({ ...value, _key: key });
+                        }
+                    }
+                    if (games.length > 1) return games;
+                }
+
+                // Buscar wrappers comunes
+                const wrapperKeys = ['data', 'wishlist', 'items', 'games', 'results', 'response'];
+                for (const wk of wrapperKeys) {
+                    if (obj[wk] && typeof obj[wk] === 'object') {
+                        const nested = extractGames(obj[wk]);
+                        if (nested.length > 0) return nested;
                     }
                 }
+
+                // Si no encontramos wrappers, iterar entries como último recurso
+                const games = [];
+                for (const [key, value] of Object.entries(obj)) {
+                    if (value && typeof value === 'object') {
+                        if (value.name && (value.discount !== undefined || value.price !== undefined)) {
+                            games.push({ ...value, _key: key });
+                        }
+                    }
+                }
+                return games;
             }
+
+            const games = extractGames(data);
 
             if (games.length === 0) {
-                return { error: 'No se encontraron juegos en el JSON. Verificá que el formato sea correcto.' };
+                console.error('parseImportedJson: no se encontraron juegos. Top-level keys:', Object.keys(data).slice(0, 10));
+                return { error: `No se encontraron juegos en el JSON (encontré ${Object.keys(data).length} keys top-level). Verificá que copiaste todo el JSON de Augmented Steam.` };
             }
 
-            // Normalizar campos (Augmented Steam usa distintos nombres)
+            // Normalizar campos
             const normalized = games.map(g => {
-                const appId = String(g.appid || g.appId || g.subid || '').trim();
-                if (!appId) return null;
+                // El appId puede venir de: campo appid/appId, la key numérica, o subid
+                const rawId = g.appid || g.appId || g._key || g.subid || '';
+                const appId = String(rawId).trim();
+                if (!appId || appId === 'undefined' || appId === 'null') return null;
 
-                // Augmented Steam usa: discount, price (en centavos), currency, name, type
-                // wishlistdata usa: discount_percent, final_price, original_price, currency, name
-                const discount = g.discount || g.discount_percent || g.discountPercent || 0;
-                const price = g.price || g.final_price || g.finalPrice || 0;
-                const originalPrice = g.original_price || g.originalPrice || g.initial_price || 0;
+                // Solo procesar entries que parezcan juegos (tienen name)
+                if (!g.name) return null;
+
+                const discount = Number(g.discount) || Number(g.discount_percent) || Number(g.discountPercent) || 0;
+                const price = Number(g.price) || Number(g.final_price) || Number(g.finalPrice) || 0;
+                const originalPrice = Number(g.original_price) || Number(g.originalPrice) || Number(g.initial_price) || 0;
                 const currency = g.currency || 'USD';
-                const name = g.name || 'Unknown';
+                const name = g.name;
 
                 return {
                     appId,
@@ -1923,8 +1980,10 @@
                 };
             }).filter(g => g !== null);
 
+            console.log(`parseImportedJson: ${normalized.length} juegos parseados de ${games.length} entries`);
+
             if (normalized.length === 0) {
-                return { error: 'No se pudieron extraer juegos válidos. El JSON no contiene campos reconocibles (appid, name, discount).' };
+                return { error: 'No se pudieron extraer juegos válidos. El JSON no contiene campos reconocibles (name, discount/price).' };
             }
 
             return { games: normalized };
@@ -2159,11 +2218,16 @@
                 }
 
                 if (wlBlocked) {
-                    // Mostrar panel de importación como opción primaria
-                    progressContainer.style.display = 'none';
-                    statusDiv.innerText = '';
-                    showImportPanel({ prevDeals, cc, steamId });
-                    return;
+                    // Si hay API key, saltar directamente al fallback (método viejo)
+                    // Si no hay API key, mostrar panel de importación
+                    if (!apiKey) {
+                        progressContainer.style.display = 'none';
+                        statusDiv.innerText = '';
+                        showImportPanel({ prevDeals, cc, steamId });
+                        return;
+                    }
+                    // Hay API key → caer al fallback de abajo (no return)
+                    console.log('Wishlistdata bloqueado, usando fallback con API key...');
                 }
 
                 if (wlDataBody && wlDataBody.games && Array.isArray(wlDataBody.games) && wlDataBody.games.length > 0) {
