@@ -12,8 +12,8 @@ export default {
     // ── Steam OpenID config ──
     const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
     const REALM = 'https://steamdeals.mozz05.workers.dev';
-    // URL donde está alojado el index.html (cambiar si es diferente)
-    const FRONTEND_URL = 'https://steamdeals.mozz05.workers.dev';
+    // URL donde está alojado el index.html
+    const FRONTEND_URL = 'https://mozzvader.github.io/SteamDeals/index.html';
 
     // ── CC → Currency code mapping ──
     const CC_CURRENCY = {
