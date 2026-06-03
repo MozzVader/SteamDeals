@@ -833,6 +833,54 @@
             display: block;
         }
 
+        /* ── Retry Banner ── */
+        .retry-banner {
+            background: var(--bg-raised);
+            border: 1px solid var(--warn);
+            padding: 12px 20px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: fadeSlideIn 0.35s ease both;
+        }
+
+        .retry-banner .retry-icon {
+            font-size: 1.1rem;
+            animation: spin 1.5s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .retry-banner .retry-text {
+            color: var(--warn);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .retry-banner .retry-counter {
+            color: var(--fg-dim);
+            font-size: 0.85rem;
+            margin-left: auto;
+        }
+
+        .retry-banner.retry-done {
+            border-color: var(--accent);
+            animation: none;
+        }
+
+        .retry-banner.retry-done .retry-icon {
+            animation: none;
+            color: var(--accent);
+        }
+
+        .retry-banner.retry-done .retry-text {
+            color: var(--accent);
+        }
+
         /* ── Responsive ── */
         @media (max-width: 900px) {
             .header {
@@ -1443,6 +1491,84 @@
                 }
 
                 progressContainer.style.display = 'none';
+
+                // ── Retry: reintentar juegos que fallaron por rate limit ──
+                const failedAppIds = appIds.filter(id => !allDeals.some(d => String(d.appId) === String(id)));
+
+                if (failedAppIds.length > 0) {
+                    // Show retry banner
+                    const retryBanner = document.createElement('div');
+                    retryBanner.className = 'retry-banner';
+                    retryBanner.id = 'retry-banner';
+                    retryBanner.innerHTML = `
+                        <span class="retry-icon">⟳</span>
+                        <span class="retry-text">Reintentando ${failedAppIds.length} juegos que fallaron por rate limit de Steam...</span>
+                        <span class="retry-counter" id="retry-counter">Esperando recuperación...</span>
+                    `;
+                    resultsDiv.insertBefore(retryBanner, resultsDiv.firstChild);
+
+                    // Wait for Steam token bucket to recover (10 seconds)
+                    const retryCounter = document.getElementById('retry-counter');
+                    for (let w = 10; w > 0; w--) {
+                        retryCounter.innerText = `Esperando ${w}s...`;
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+
+                    retryCounter.innerText = `0/${failedAppIds.length}`;
+
+                    // Retry in batches of 2 with 2s delay between batches
+                    const retryBatches = chunkArray(failedAppIds, 2);
+                    let retryDealsCount = 0;
+
+                    for (let i = 0; i < retryBatches.length; i++) {
+                        retryCounter.innerText = `${i * 2}/${failedAppIds.length}`;
+                        try {
+                            const retryUrl = `${WORKER_URL}?mode=retry&appids=${retryBatches[i].join(',')}&cc=${cc}`;
+                            const retryRes = await fetch(retryUrl);
+                            if (retryRes.ok) {
+                                const retryData = await retryRes.json();
+                                const retryDeals = retryData.deals || [];
+                                if (retryDeals.length > 0) {
+                                    retryDealsCount += retryDeals.length;
+                                    retryDeals.forEach(deal => {
+                                        allDeals.push(deal);
+                                        const card = buildCard(deal);
+                                        card.style.animation = 'fadeSlideIn 0.5s ease both';
+                                        resultsDiv.appendChild(card);
+                                    });
+                                    if (!toolbar.classList.contains('visible')) {
+                                        toolbar.classList.add('visible');
+                                    }
+                                    updateCount();
+                                    updateCartUI();
+                                }
+                            }
+                        } catch(e) {
+                            console.error('Retry error:', e);
+                        }
+                        if (i < retryBatches.length - 1) await new Promise(r => setTimeout(r, 2000));
+                    }
+
+                    // Update banner to done state
+                    retryBanner.className = 'retry-banner retry-done';
+                    const retryIcon = retryBanner.querySelector('.retry-icon');
+                    const retryText = retryBanner.querySelector('.retry-text');
+                    retryIcon.innerText = '✓';
+                    if (retryDealsCount > 0) {
+                        retryText.innerText = `Retry completado. +${retryDealsCount} deals recuperados.`;
+                    } else {
+                        retryText.innerText = `Retry completado. No se encontraron deals adicionales.`;
+                    }
+                    retryCounter.innerText = `${failedAppIds.length}/${failedAppIds.length}`;
+
+                    // Auto-hide retry banner after 8 seconds
+                    setTimeout(() => {
+                        retryBanner.style.transition = 'opacity 0.5s';
+                        retryBanner.style.opacity = '0';
+                        setTimeout(() => retryBanner.remove(), 500);
+                    }, 8000);
+                }
+
                 setDealsCache(allDeals);
 
                 if (allDeals.length > 0) {

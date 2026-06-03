@@ -511,6 +511,46 @@
 
             progressContainer.style.display = 'none';
 
+            // ── Retry phase ──
+            const rateLimitedIds = [];
+            if (totalDebug) {
+                totalDebug.games.forEach(g => {
+                    const hasError = g.calls.some(c => c.api === 'appdetails' && !c.ok);
+                    if (hasError && !g.dealFound) rateLimitedIds.push(g.appId);
+                });
+            }
+
+            let retryDealsCount = 0;
+            if (rateLimitedIds.length > 0) {
+                appendLog(`\n── RETRY: ${rateLimitedIds.length} juegos rate-limited, esperando 10s... ──`, 'warn');
+                await new Promise(r => setTimeout(r, 10000));
+
+                const retryBatches = [];
+                for (let i = 0; i < rateLimitedIds.length; i += 2) retryBatches.push(rateLimitedIds.slice(i, i + 2));
+
+                for (let i = 0; i < retryBatches.length; i++) {
+                    statusEl.innerText = `Retry: batch ${i + 1}/${retryBatches.length}...`;
+                    try {
+                        const retryUrl = `${WORKER_URL}?mode=retry&appids=${retryBatches[i].join(',')}&cc=${cc}`;
+                        const retryRes = await fetch(retryUrl);
+                        if (retryRes.ok) {
+                            const retryData = await retryRes.json();
+                            const retryDeals = retryData.deals || [];
+                            retryDealsCount += retryDeals.length;
+                            if (retryDeals.length > 0) {
+                                retryDeals.forEach(d => appendLog(`  ↩ ${d.appId} ✅ ${d.name} (-${d.discount}%)`, 'ok'));
+                            }
+                        }
+                    } catch(e) {
+                        appendLog(`  Retry batch ${i+1}: ERROR — ${e.message}`, 'err');
+                    }
+                    if (i < retryBatches.length - 1) await new Promise(r => setTimeout(r, 2000));
+                }
+
+                totalDeals += retryDealsCount;
+                appendLog(`Retry completado: +${retryDealsCount} deals recuperados de ${rateLimitedIds.length} intentos`, retryDealsCount > 0 ? 'ok' : 'warn');
+            }
+
             // Summary
             const d = totalDebug;
             const cacheTotal = d.cacheHits + d.cacheMisses;
@@ -525,6 +565,7 @@
                 <div class="summary-card"><div class="label">Rate Limits</div><div class="value ${steamRateLimits > 0 ? 'red' : 'green'}">${steamRateLimits} (${rateLimitPct}%)</div></div>
                 <div class="summary-card"><div class="label">Otros Errores</div><div class="value ${d.errors.length - steamRateLimits > 0 ? 'amber' : 'green'}">${d.errors.length - steamRateLimits}</div></div>
                 <div class="summary-card"><div class="label">Tiempo Total</div><div class="value blue">${(d.totalMs / 1000).toFixed(1)}s</div></div>
+                <div class="summary-card"><div class="label">Retry Recovery</div><div class="value ${rateLimitedIds.length > 0 ? (retryDealsCount > 0 ? 'green' : 'amber') : 'green'}">${rateLimitedIds.length > 0 ? `+${retryDealsCount}` : 'N/A'}</div></div>
             `;
 
             statusEl.innerText = `Test completado. ${totalDeals} deals encontrados en ${(d.totalMs / 1000).toFixed(1)}s`;
