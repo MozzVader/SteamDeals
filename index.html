@@ -1089,7 +1089,7 @@
 
         <div class="config-row">
             <input type="text" id="steamIdInput" placeholder="Vanity ID o Steam64 ID">
-            <input type="text" id="apiKeyInput" placeholder="API Key (opcional)">
+            <input type="text" id="apiKeyInput" placeholder="API Key (solo si scrape falla)" title="Solo necesario si el scrape es rate-limited">
             <input type="text" id="countryInput" class="small-input" value="ar" title="Código de país (ej: ar, us, es)">
             <a href="https://steamdeals.mozz05.workers.dev/?action=login" class="steam-login-btn" id="steamLoginBtn">
                 <i class="fa-brands fa-steam"></i>
@@ -1195,8 +1195,8 @@
                     ? window.location.pathname + '?' + urlParams.toString()
                     : window.location.pathname;
                 window.history.replaceState({}, '', newUrl);
-                // Feedback visual de login exitoso
-                document.getElementById('status').innerHTML = '<span style="color: var(--accent)"><i class="fa-brands fa-steam"></i> Logged in via Steam</span>';
+                // Auto-buscar ofertas despues del login
+                startTracking();
             }
 
             if (loginError) {
@@ -1869,10 +1869,12 @@
 
             // ── Sin resultados ──
             if (appIds.length === 0) {
-                let msg = 'No se pudo obtener la wishlist.';
-                if (!apiKey) msg += ' Proveé una Steam API Key como fallback.';
-                else msg += ' Tu wishlist puede ser privada o el perfil no existe.';
-                statusDiv.innerText = msg;
+                if (!apiKey) {
+                    statusDiv.innerHTML = 'Scrape falló (rate-limited). <a href="https://steamcommunity.com/dev/apikey" target="_blank" style="color:var(--blue)">Obtené tu Steam API Key</a> y pegala en el campo de arriba.';
+                    document.getElementById('apiKeyInput').focus();
+                } else {
+                    statusDiv.innerText = 'No se pudo obtener la wishlist. Puede ser privada o el perfil no existe.';
+                }
                 progressContainer.style.display = 'none';
                 return;
             }
