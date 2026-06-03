@@ -80,7 +80,7 @@ export default {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // mode=scrape: extrae appids del HTML de la wishlist pública
+    // mode=scrape: obtiene appids scrapeando el HTML de la wishlist
     // ══════════════════════════════════════════════════════════════
     if (mode === 'scrape') {
       const profile = url.searchParams.get('profile');
@@ -103,12 +103,10 @@ export default {
         });
 
         if (!res.ok) {
-          const is429 = res.status === 429;
           return new Response(JSON.stringify({
             error: `HTTP ${res.status}`,
             blocked: true,
-            rate_limited: is429,
-            retry_after: is429 ? 5 : null
+            rate_limited: res.status === 429
           }), { status: res.status, headers: CORS });
         }
 
@@ -127,13 +125,6 @@ export default {
           }
         }
 
-        // Fallback: patrón "appid":numero
-        const fallbackIds = [...html.matchAll(/"appid"\s*:\s*(\d+)/g)].map(m => m[1]);
-        const uniqueFallback = [...new Set(fallbackIds)];
-        if (uniqueFallback.length > 0) {
-          return new Response(JSON.stringify(uniqueFallback), { headers: CORS });
-        }
-
         return new Response(JSON.stringify({ error: 'No se encontraron appids', blocked: true }), {
           status: 404, headers: CORS
         });
@@ -144,7 +135,7 @@ export default {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // mode=wishlist: obtiene appids via Steam Web API (requiere API key)
+    // mode=wishlist: obtiene appids via Steam Web API (API Key)
     // ══════════════════════════════════════════════════════════════
     if (mode === 'wishlist') {
       const steamId = url.searchParams.get('steamid');
