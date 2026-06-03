@@ -124,8 +124,8 @@ export default {
 
     // ── mode=wishlistdata: obtiene TODA la wishlist con precios en 1 request ──
     // Usa el endpoint público de Steam Store (igual que Augmented Steam).
-    // Devuelve todos los juegos con nombre, precio, descuento, etc.
-    // No requiere API key — solo Steam64 ID.
+    // NOTA: Steam puede bloquear requests desde IPs de cloud (302 redirect).
+    // El frontend debe ofrecer fallback: JSON import o Wishlist API.
     if (mode === 'wishlistdata') {
       const steamId = url.searchParams.get('steamid');
       const cc = url.searchParams.get('cc') || 'us';
@@ -137,15 +137,36 @@ export default {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'application/json, text/javascript, */*; q=0.01',
           'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://store.steampowered.com/wishlist/profiles/' + steamId + '/',
           'Cookie': `cc=${cc}; l=english`
         };
-        const wlRes = await fetch(wlUrl, { headers });
+        // redirect:'manual' para detectar 302 sin seguirlo
+        const wlRes = await fetch(wlUrl, { headers, redirect: 'manual' });
+
+        // 302/301 = Steam bloquea la request (IP de cloud, bot detection)
+        if (wlRes.status >= 300 && wlRes.status < 400) {
+          const loc = wlRes.headers.get('Location') || 'unknown';
+          return new Response(JSON.stringify({
+            error: 'Steam bloqueó la solicitud (redirect 302). Steam está bloqueando requests desde IPs de cloud/servidor.',
+            blocked: true,
+            redirectTo: loc
+          }), { status: 503, headers: CORS });
+        }
 
         if (!wlRes.ok) {
           return new Response(JSON.stringify({ error: `Steam respondió con ${wlRes.status}` }), { status: 502, headers: CORS });
         }
 
-        const wlRaw = await wlRes.json();
+        const text = await wlRes.text();
+        // Verificar que no recibimos HTML (otro tipo de bloqueo)
+        if (text.trim().startsWith('<') || text.trim().startsWith('<!')) {
+          return new Response(JSON.stringify({
+            error: 'Steam devolvió HTML en vez de JSON (posible captcha o bloqueo).',
+            blocked: true
+          }), { status: 503, headers: CORS });
+        }
+
+        const wlRaw = JSON.parse(text);
 
         // Transformar a array con campos relevantes
         const games = [];

@@ -973,6 +973,105 @@
             font-size: 0.65rem;
         }
 
+        /* ── Import Panel ── */
+        .import-panel {
+            background: var(--bg-raised);
+            border: 1px solid var(--border);
+            padding: 24px;
+            margin-bottom: 20px;
+            animation: fadeSlideIn 0.35s ease both;
+        }
+        .import-panel h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--fg);
+        }
+        .import-panel p {
+            font-size: 0.9rem;
+            color: var(--fg-dim);
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+        .import-panel .import-steps {
+            font-size: 0.85rem;
+            color: var(--fg-dim);
+            margin-bottom: 16px;
+            line-height: 1.6;
+            padding: 12px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+        }
+        .import-panel .import-steps ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .import-panel .import-steps li {
+            margin-bottom: 4px;
+        }
+        .import-textarea {
+            width: 100%;
+            min-height: 120px;
+            max-height: 300px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-input);
+            color: var(--fg);
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.8rem;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .import-textarea:focus {
+            border-color: var(--accent);
+        }
+        .import-textarea::placeholder {
+            color: var(--fg-dim);
+            font-family: var(--font);
+        }
+        .import-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+            align-items: center;
+        }
+        .import-actions .btn-secondary {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--fg-dim);
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .import-actions .btn-secondary:hover {
+            color: var(--fg);
+            border-color: var(--fg-dim);
+            background: none;
+            box-shadow: none;
+        }
+        .import-error {
+            color: var(--danger);
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+        .import-or-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 16px;
+            color: var(--fg-dim);
+            font-size: 0.85rem;
+        }
+        .import-or-divider::before,
+        .import-or-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
         /* ── Responsive ── */
         @media (max-width: 900px) {
             .header {
@@ -1097,6 +1196,7 @@
         </div>
 
         <div id="results"></div>
+        <div id="import-panel" style="display:none;"></div>
     </div>
 
     <!-- Cart FAB -->
@@ -1191,9 +1291,9 @@
                 if (e.key === 'Escape') closeCart();
             });
 
-            // Auto-load cached deals if steamId and apiKey are available
+            // Auto-load cached deals if steamId is available (no API key required)
             const savedSteamId = localStorage.getItem('steamId');
-            if (savedSteamId && localStorage.getItem('steamApiKey')) {
+            if (savedSteamId) {
                 const cachedDeals = getDealsCache();
                 const cc = localStorage.getItem('steamCountry') || 'us';
                 if (cachedDeals && isCacheFresh(cachedDeals) && cachedDeals.steamId === savedSteamId && cachedDeals.country === cc) {
@@ -1714,6 +1814,283 @@
             return { totalRetryDeals, stillFailed };
         }
 
+        // ── Import Panel: muestra opciones cuando wishlistdata falla ──
+        function showImportPanel(options = {}) {
+            const panel = document.getElementById('import-panel');
+            const { prevDeals, cc, steamId } = options;
+            panel.style.display = 'block';
+            panel.innerHTML = `
+                <div class="import-panel">
+                    <h3><i class="fa-solid fa-triangle-exclamation" style="color:var(--warn);margin-right:8px;"></i>Steam bloqueó la solicitud directa</h3>
+                    <p>Steam está bloqueando requests desde servidores/cloud. Pero hay dos formas de obtener tus datos:</p>
+
+                    <div style="display:flex;gap:16px;margin-bottom:16px;">
+                        <div style="flex:1;">
+                            <h4 style="color:var(--accent);font-size:0.95rem;margin-bottom:6px;">
+                                <i class="fa-solid fa-paste" style="margin-right:4px;"></i> Opción 1: Importar JSON (instantáneo)
+                            </h4>
+                            <div class="import-steps">
+                                <ol>
+                                    <li>Instalá la extensión <strong>Augmented Steam</strong> en tu browser</li>
+                                    <li>Andá a tu <a href="https://store.steampowered.com/wishlist/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Wishlist de Steam</a></li>
+                                    <li>Hacé click derecho en la página → "Export wishlist data"</li>
+                                    <li>Copiá el JSON y pegalo abajo</li>
+                                </ol>
+                            </div>
+                            <textarea class="import-textarea" id="importJsonInput" placeholder='Pegá el JSON de Augmented Steam acá...&#10;&#10;Ejemplo: { "12345": { "name": "Juego", "discount": 50, ... }, ... }'></textarea>
+                            <div id="importError" class="import-error" style="display:none;"></div>
+                            <div class="import-actions">
+                                <button onclick="processImportedJson()">
+                                    <i class="fa-solid fa-bolt" style="margin-right:4px;"></i> Importar y Buscar Ofertas
+                                </button>
+                                <button class="btn-secondary" onclick="document.getElementById('importJsonInput').value='';document.getElementById('importError').style.display='none';">Limpiar</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="import-or-divider">o</div>
+
+                    <div style="margin-top:12px;">
+                        <h4 style="color:var(--blue);font-size:0.95rem;margin-bottom:6px;">
+                            <i class="fa-solid fa-key" style="margin-right:4px;"></i> Opción 2: API Key (más lento, puede tener rate limiting)
+                        </h4>
+                        <p style="font-size:0.85rem;">Ingresá tu Steam API Key en el campo de arriba y presioná el botón. Este método obtiene tu wishlist pero necesita consultar cada juego individualmente, lo que puede tardar más y perder algunos resultados por rate limiting de Steam.</p>
+                    </div>
+                </div>
+            `;
+            // Scroll to import panel
+            panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function hideImportPanel() {
+            const panel = document.getElementById('import-panel');
+            if (panel) {
+                panel.style.display = 'none';
+                panel.innerHTML = '';
+            }
+        }
+
+        // ── Parse imported JSON (Augmented Steam format) ──
+        // Soporta dos formatos:
+        // 1) Objeto: { "12345": { "name": "...", "discount": 50, ... }, ... }
+        // 2) Array: [ { "appid": 12345, "name": "...", ... }, ... ]
+        function parseImportedJson(jsonStr) {
+            let data;
+            try {
+                data = JSON.parse(jsonStr);
+            } catch (e) {
+                return { error: 'JSON inválido. Verificá que hayas copiado todo el JSON correctamente.' };
+            }
+
+            // Normalizar a array
+            let games = [];
+            if (Array.isArray(data)) {
+                games = data;
+            } else if (typeof data === 'object' && data !== null) {
+                // Objeto: las keys son appIds
+                for (const [key, value] of Object.entries(data)) {
+                    if (value && typeof value === 'object') {
+                        // Agregar el appId como campo
+                        games.push({ ...value, appid: value.appid || parseInt(key) || key });
+                    }
+                }
+            }
+
+            if (games.length === 0) {
+                return { error: 'No se encontraron juegos en el JSON. Verificá que el formato sea correcto.' };
+            }
+
+            // Normalizar campos (Augmented Steam usa distintos nombres)
+            const normalized = games.map(g => {
+                const appId = String(g.appid || g.appId || g.subid || '').trim();
+                if (!appId) return null;
+
+                // Augmented Steam usa: discount, price (en centavos), currency, name, type
+                // wishlistdata usa: discount_percent, final_price, original_price, currency, name
+                const discount = g.discount || g.discount_percent || g.discountPercent || 0;
+                const price = g.price || g.final_price || g.finalPrice || 0;
+                const originalPrice = g.original_price || g.originalPrice || g.initial_price || 0;
+                const currency = g.currency || 'USD';
+                const name = g.name || 'Unknown';
+
+                return {
+                    appId,
+                    name,
+                    discount_percent: discount,
+                    final_price: price,
+                    original_price: originalPrice,
+                    currency
+                };
+            }).filter(g => g !== null);
+
+            if (normalized.length === 0) {
+                return { error: 'No se pudieron extraer juegos válidos. El JSON no contiene campos reconocibles (appid, name, discount).' };
+            }
+
+            return { games: normalized };
+        }
+
+        // ── Process imported JSON: filtrar ofertas y enriquecer ──
+        async function processImportedJson() {
+            const jsonStr = document.getElementById('importJsonInput').value.trim();
+            const errorEl = document.getElementById('importError');
+            const steamId = document.getElementById('steamIdInput').value;
+            const apiKey = document.getElementById('apiKeyInput').value;
+            const cc = document.getElementById('countryInput').value.toLowerCase() || 'us';
+            const resultsDiv = document.getElementById('results');
+            const statusDiv = document.getElementById('status');
+            const progressBar = document.getElementById('progress-bar');
+            const progressContainer = document.getElementById('progress-container');
+            const toolbar = document.getElementById('toolbar');
+
+            // Validar
+            if (!jsonStr) {
+                errorEl.textContent = 'Pegá el JSON de Augmented Steam acá primero.';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            const parsed = parseImportedJson(jsonStr);
+            if (parsed.error) {
+                errorEl.textContent = parsed.error;
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            errorEl.style.display = 'none';
+            hideImportPanel();
+
+            // Cache previo para comparar
+            const cachedDeals = getDealsCache();
+            const prevDeals = cachedDeals && cachedDeals.steamId === steamId && cachedDeals.country === cc
+                ? [...cachedDeals.deals]
+                : (allDeals.length > 0 ? [...allDeals] : null);
+
+            const games = parsed.games;
+            const totalGames = games.length;
+
+            // Filtrar juegos en oferta
+            const discountedGames = games.filter(g => g.discount_percent > 0);
+            const discountedAppIds = discountedGames.map(g => g.appId);
+
+            // Mapa rápido para lookup
+            const wlMap = {};
+            games.forEach(g => wlMap[g.appId] = g);
+
+            // Mostrar progreso
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '5%';
+            progressBar.innerText = '5%';
+            statusDiv.innerText = `Wishlist importada: ${totalGames} juegos. ${discountedAppIds.length} en oferta.`;
+
+            if (discountedAppIds.length === 0) {
+                allDeals = [];
+                resultsDiv.innerHTML = '';
+                progressContainer.style.display = 'none';
+                toolbar.classList.remove('visible');
+                setDealsCache([]);
+                if (prevDeals && prevDeals.length > 0) compareAndNotify(prevDeals, []);
+                statusDiv.innerText = `${totalGames} juegos en wishlist. Ninguno está en oferta.`;
+                return;
+            }
+
+            progressBar.style.width = '15%';
+            progressBar.innerText = '15%';
+
+            // ── Enriquecer: appdetails (precio regional) + CheapShark + Reviews ──
+            const lots = chunkArray(discountedAppIds, 8);
+            const freshDeals = [];
+            const failedAppIdsPerBatch = [];
+
+            statusDiv.innerText = `Enriqueciendo ${discountedAppIds.length} juegos en oferta...`;
+
+            for (let i = 0; i < lots.length; i++) {
+                const pct = 15 + Math.round(((i + 1) / lots.length) * 70);
+                progressBar.style.width = pct + '%';
+                progressBar.innerText = pct + '%';
+                statusDiv.innerText = `Lote ${i + 1}/${lots.length} (${discountedAppIds.length} en oferta)...`;
+
+                try {
+                    const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lots[i].join(',')}&cc=${cc}`;
+                    const dealsRes = await fetch(dealsUrl);
+                    if (dealsRes.ok) {
+                        const data = await dealsRes.json();
+                        freshDeals.push(...(data.deals || []));
+                        failedAppIdsPerBatch.push(...(data.failedAppIds || []));
+                    }
+                } catch (batchErr) {
+                    console.error(`Lote ${i + 1} error:`, batchErr);
+                }
+                if (i < lots.length - 1) await new Promise(r => setTimeout(r, 500));
+            }
+
+            // Mapa de deals enriquecidos
+            const enrichedMap = new Map(freshDeals.map(d => [String(d.appId), d]));
+
+            // Swap
+            allDeals = freshDeals;
+            resultsDiv.innerHTML = '';
+            if (allDeals.length > 0) {
+                toolbar.classList.add('visible');
+                document.getElementById('searchInput').value = '';
+                document.getElementById('sortSelect').value = 'discount-desc';
+                document.getElementById('minDiscountInput').value = '0';
+                document.getElementById('minDiscountValue').textContent = '0';
+                allDeals.forEach(deal => resultsDiv.appendChild(buildCard(deal)));
+                updateCount();
+                updateCartUI();
+            }
+            progressBar.style.width = '90%';
+            progressBar.innerText = '90%';
+            progressContainer.style.display = 'none';
+
+            // Retry cascade
+            const retryTargets = failedAppIdsPerBatch.filter(id => !enrichedMap.has(String(id)));
+            if (retryTargets.length > 0) {
+                const { totalRetryDeals, stillFailed } = await runRetryCascade(retryTargets, cc);
+                allDeals.forEach(d => enrichedMap.set(String(d.appId), d));
+            }
+
+            // Fallback: cards básicos para juegos que no se pudieron enriquecer
+            let fallbackCount = 0;
+            for (const appId of discountedAppIds) {
+                if (!enrichedMap.has(String(appId))) {
+                    const info = wlMap[appId];
+                    if (info) {
+                        const fallbackDeal = {
+                            appId: appId,
+                            name: info.name || 'Desconocido',
+                            steamPrice: (info.final_price / 100).toFixed(2),
+                            originalPrice: (info.original_price / 100).toFixed(2),
+                            discount: info.discount_percent,
+                            currency: info.currency || 'USD',
+                            lowestEverUsd: null,
+                            maxDiscountUs: null,
+                            reviewScore: null,
+                            reviewLabel: ''
+                        };
+                        allDeals.push(fallbackDeal);
+                        enrichedMap.set(String(appId), fallbackDeal);
+                        const card = buildCard(fallbackDeal);
+                        resultsDiv.appendChild(card);
+                        fallbackCount++;
+                    }
+                }
+            }
+            if (fallbackCount > 0) {
+                updateCount();
+                updateCartUI();
+            }
+
+            // Guardar cache + notificar cambios
+            setDealsCache(allDeals);
+            if (prevDeals && prevDeals.length > 0) {
+                compareAndNotify(prevDeals, allDeals);
+            }
+
+            statusDiv.innerText = `${discountedAppIds.length} juegos en oferta (importados).${fallbackCount > 0 ? ` (${fallbackCount} sin precio regional)` : ''}`;
+        }
+
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
@@ -1748,6 +2125,7 @@
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             progressBar.innerText = '0%';
+            hideImportPanel(); // Limpiar panel de importación previo
             if (!hasCache) {
                 statusDiv.innerText = 'Obteniendo datos de wishlist...';
             } else {
@@ -1764,142 +2142,164 @@
                 const wlDataRes = await fetch(wlDataUrl);
                 let fastPath = false;
 
+                // Leer respuesta una sola vez (el body solo se puede consumir una vez)
+                let wlDataBody = null;
+                let wlBlocked = false;
                 if (wlDataRes.ok) {
-                    const wlData = await wlDataRes.json();
-                    if (wlData.games && Array.isArray(wlData.games) && wlData.games.length > 0) {
-                        fastPath = true;
-                        const totalGames = wlData.totalGames || wlData.games.length;
-
-                        // Filtrar juegos en oferta
-                        const discountedGames = wlData.games.filter(g => g.discount_percent > 0);
-                        const discountedAppIds = discountedGames.map(g => g.appId);
-
-                        // Mapa rápido para lookup por appId
-                        const wlMap = {};
-                        wlData.games.forEach(g => wlMap[g.appId] = g);
-
-                        statusDiv.innerText = `${totalGames} juegos en wishlist. ${discountedAppIds.length} en oferta.`;
-                        progressBar.style.width = '15%';
-                        progressBar.innerText = '15%';
-
-                        if (discountedAppIds.length === 0) {
-                            // No hay ofertas — respuesta definitiva, no se necesita buscar más
-                            allDeals = [];
-                            resultsDiv.innerHTML = '';
-                            progressContainer.style.display = 'none';
-                            toolbar.classList.remove('visible');
-                            setDealsCache([]);
-                            if (prevDeals && prevDeals.length > 0) compareAndNotify(prevDeals, []);
-                            statusDiv.innerText = `${totalGames} juegos en wishlist. Ninguno está en oferta.`;
-                            return;
+                    wlDataBody = await wlDataRes.json();
+                } else if (wlDataRes.status === 503) {
+                    // Steam bloqueó la request (302 redirect desde IP de cloud)
+                    try {
+                        const errData = await wlDataRes.json();
+                        if (errData.blocked) {
+                            wlBlocked = true;
+                            console.warn('Steam bloqueó wishlistdata:', errData.error);
                         }
+                    } catch(e) {}
+                }
 
-                        // ── Enriquecer: appdetails (precio regional ARS) + CheapShark + Reviews ──
-                        // Solo procesamos los juegos que están en oferta (~80 vs 360 antes)
-                        const lots = chunkArray(discountedAppIds, 8);
-                        const freshDeals = [];
-                        const failedAppIdsPerBatch = [];
+                if (wlBlocked) {
+                    // Mostrar panel de importación como opción primaria
+                    progressContainer.style.display = 'none';
+                    statusDiv.innerText = '';
+                    showImportPanel({ prevDeals, cc, steamId });
+                    return;
+                }
 
-                        statusDiv.innerText = `Obteniendo detalles para ${discountedAppIds.length} juegos en oferta...`;
+                if (wlDataBody && wlDataBody.games && Array.isArray(wlDataBody.games) && wlDataBody.games.length > 0) {
+                    fastPath = true;
+                    const totalGames = wlDataBody.totalGames || wlDataBody.games.length;
 
-                        for (let i = 0; i < lots.length; i++) {
-                            const pct = 15 + Math.round(((i + 1) / lots.length) * 70);
-                            progressBar.style.width = pct + '%';
-                            progressBar.innerText = pct + '%';
-                            statusDiv.innerText = `Enriqueciendo lote ${i + 1} de ${lots.length} (${discountedAppIds.length} en oferta)...`;
+                    // Filtrar juegos en oferta
+                    const discountedGames = wlDataBody.games.filter(g => g.discount_percent > 0);
+                    const discountedAppIds = discountedGames.map(g => g.appId);
 
-                            try {
-                                const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lots[i].join(',')}&cc=${cc}`;
-                                const dealsRes = await fetch(dealsUrl);
-                                if (dealsRes.ok) {
-                                    const data = await dealsRes.json();
-                                    freshDeals.push(...(data.deals || []));
-                                    failedAppIdsPerBatch.push(...(data.failedAppIds || []));
-                                }
-                            } catch (batchErr) {
-                                console.error(`Lote ${i + 1} error:`, batchErr);
-                            }
-                            if (i < lots.length - 1) await new Promise(r => setTimeout(r, 500));
-                        }
+                    // Mapa rápido para lookup por appId
+                    const wlMap = {};
+                    wlDataBody.games.forEach(g => wlMap[g.appId] = g);
 
-                        // Mapa de deals enriquecidos
-                        const enrichedMap = new Map(freshDeals.map(d => [String(d.appId), d]));
+                    statusDiv.innerText = `${totalGames} juegos en wishlist. ${discountedAppIds.length} en oferta.`;
+                    progressBar.style.width = '15%';
+                    progressBar.innerText = '15%';
 
-                        // ── Swap: reemplazar cache con resultados enriquecidos ──
-                        allDeals = freshDeals;
+                    if (discountedAppIds.length === 0) {
+                        // No hay ofertas — respuesta definitiva, no se necesita buscar más
+                        allDeals = [];
                         resultsDiv.innerHTML = '';
-                        if (allDeals.length > 0) {
-                            toolbar.classList.add('visible');
-                            document.getElementById('searchInput').value = '';
-                            document.getElementById('sortSelect').value = 'discount-desc';
-                            document.getElementById('minDiscountInput').value = '0';
-                            document.getElementById('minDiscountValue').textContent = '0';
-                            allDeals.forEach(deal => resultsDiv.appendChild(buildCard(deal)));
-                            updateCount();
-                            updateCartUI();
-                        }
-                        progressBar.style.width = '90%';
-                        progressBar.innerText = '90%';
                         progressContainer.style.display = 'none';
+                        toolbar.classList.remove('visible');
+                        setDealsCache([]);
+                        if (prevDeals && prevDeals.length > 0) compareAndNotify(prevDeals, []);
+                        statusDiv.innerText = `${totalGames} juegos en wishlist. Ninguno está en oferta.`;
+                        return;
+                    }
 
-                        // ── Retry cascade (solo juegos que fallaron el enriquecimiento) ──
-                        const retryTargets = failedAppIdsPerBatch.filter(id => !enrichedMap.has(String(id)));
-                        if (retryTargets.length > 0) {
-                            const { totalRetryDeals, stillFailed } = await runRetryCascade(retryTargets, cc);
-                            // Agregar deals recuperados al enrichedMap
-                            allDeals.forEach(d => enrichedMap.set(String(d.appId), d));
+                    // ── Enriquecer: appdetails (precio regional ARS) + CheapShark + Reviews ──
+                    // Solo procesamos los juegos que están en oferta (~80 vs 360 antes)
+                    const lots = chunkArray(discountedAppIds, 8);
+                    const freshDeals = [];
+                    const failedAppIdsPerBatch = [];
+
+                    statusDiv.innerText = `Obteniendo detalles para ${discountedAppIds.length} juegos en oferta...`;
+
+                    for (let i = 0; i < lots.length; i++) {
+                        const pct = 15 + Math.round(((i + 1) / lots.length) * 70);
+                        progressBar.style.width = pct + '%';
+                        progressBar.innerText = pct + '%';
+                        statusDiv.innerText = `Enriqueciendo lote ${i + 1} de ${lots.length} (${discountedAppIds.length} en oferta)...`;
+
+                        try {
+                            const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lots[i].join(',')}&cc=${cc}`;
+                            const dealsRes = await fetch(dealsUrl);
+                            if (dealsRes.ok) {
+                                const data = await dealsRes.json();
+                                freshDeals.push(...(data.deals || []));
+                                failedAppIdsPerBatch.push(...(data.failedAppIds || []));
+                            }
+                        } catch (batchErr) {
+                            console.error(`Lote ${i + 1} error:`, batchErr);
                         }
+                        if (i < lots.length - 1) await new Promise(r => setTimeout(r, 500));
+                    }
 
-                        // ── Fallback: cards básicos para juegos que no se pudieron enriquecer ──
-                        // Usamos datos del wishlistdata (nombre + descuento + precio USD)
-                        let fallbackCount = 0;
-                        for (const appId of discountedAppIds) {
-                            if (!enrichedMap.has(String(appId))) {
-                                const info = wlMap[appId];
-                                if (info) {
-                                    const fallbackDeal = {
-                                        appId: appId,
-                                        name: info.name || 'Desconocido',
-                                        steamPrice: (info.final_price / 100).toFixed(2),
-                                        originalPrice: (info.original_price / 100).toFixed(2),
-                                        discount: info.discount_percent,
-                                        currency: info.currency || 'USD',
-                                        lowestEverUsd: null,
-                                        maxDiscountUs: null,
-                                        reviewScore: null,
-                                        reviewLabel: ''
-                                    };
-                                    allDeals.push(fallbackDeal);
-                                    enrichedMap.set(String(appId), fallbackDeal);
-                                    const card = buildCard(fallbackDeal);
-                                    resultsDiv.appendChild(card);
-                                    fallbackCount++;
-                                }
+                    // Mapa de deals enriquecidos
+                    const enrichedMap = new Map(freshDeals.map(d => [String(d.appId), d]));
+
+                    // ── Swap: reemplazar cache con resultados enriquecidos ──
+                    allDeals = freshDeals;
+                    resultsDiv.innerHTML = '';
+                    if (allDeals.length > 0) {
+                        toolbar.classList.add('visible');
+                        document.getElementById('searchInput').value = '';
+                        document.getElementById('sortSelect').value = 'discount-desc';
+                        document.getElementById('minDiscountInput').value = '0';
+                        document.getElementById('minDiscountValue').textContent = '0';
+                        allDeals.forEach(deal => resultsDiv.appendChild(buildCard(deal)));
+                        updateCount();
+                        updateCartUI();
+                    }
+                    progressBar.style.width = '90%';
+                    progressBar.innerText = '90%';
+                    progressContainer.style.display = 'none';
+
+                    // ── Retry cascade (solo juegos que fallaron el enriquecimiento) ──
+                    const retryTargets = failedAppIdsPerBatch.filter(id => !enrichedMap.has(String(id)));
+                    if (retryTargets.length > 0) {
+                        const { totalRetryDeals, stillFailed } = await runRetryCascade(retryTargets, cc);
+                        // Agregar deals recuperados al enrichedMap
+                        allDeals.forEach(d => enrichedMap.set(String(d.appId), d));
+                    }
+
+                    // ── Fallback: cards básicos para juegos que no se pudieron enriquecer ──
+                    // Usamos datos del wishlistdata (nombre + descuento + precio USD)
+                    let fallbackCount = 0;
+                    for (const appId of discountedAppIds) {
+                        if (!enrichedMap.has(String(appId))) {
+                            const info = wlMap[appId];
+                            if (info) {
+                                const fallbackDeal = {
+                                    appId: appId,
+                                    name: info.name || 'Desconocido',
+                                    steamPrice: (info.final_price / 100).toFixed(2),
+                                    originalPrice: (info.original_price / 100).toFixed(2),
+                                    discount: info.discount_percent,
+                                    currency: info.currency || 'USD',
+                                    lowestEverUsd: null,
+                                    maxDiscountUs: null,
+                                    reviewScore: null,
+                                    reviewLabel: ''
+                                };
+                                allDeals.push(fallbackDeal);
+                                enrichedMap.set(String(appId), fallbackDeal);
+                                const card = buildCard(fallbackDeal);
+                                resultsDiv.appendChild(card);
+                                fallbackCount++;
                             }
                         }
-                        if (fallbackCount > 0) {
-                            updateCount();
-                            updateCartUI();
-                        }
-
-                        // ── Guardar cache + notificar cambios ──
-                        setDealsCache(allDeals);
-                        if (prevDeals && prevDeals.length > 0) {
-                            compareAndNotify(prevDeals, allDeals);
-                        }
-
-                        statusDiv.innerText = `${discountedAppIds.length} juegos en oferta.${fallbackCount > 0 ? ` (${fallbackCount} sin precio regional)` : ''}`;
-                        return; // ✅ Fast path completado
                     }
+                    if (fallbackCount > 0) {
+                        updateCount();
+                        updateCartUI();
+                    }
+
+                    // ── Guardar cache + notificar cambios ──
+                    setDealsCache(allDeals);
+                    if (prevDeals && prevDeals.length > 0) {
+                        compareAndNotify(prevDeals, allDeals);
+                    }
+
+                    statusDiv.innerText = `${discountedAppIds.length} juegos en oferta.${fallbackCount > 0 ? ` (${fallbackCount} sin precio regional)` : ''}`;
+                    return; // ✅ Fast path completado
                 }
 
                 // ══════════════════════════════════════════════════════════════
                 // FALLBACK: Approach anterior (Wishlist API + per-game deals)
-                // Se usa si wishlistdata falla o devuelve datos vacíos.
+                // Se usa si wishlistdata falla por otro motivo o devuelve datos vacíos.
                 // ══════════════════════════════════════════════════════════════
                 if (!apiKey) {
-                    statusDiv.innerText = "⚠️ Ingresá tu API Key para usar el método alternativo.";
+                    // No hay API key → mostrar import panel también
                     progressContainer.style.display = 'none';
+                    showImportPanel({ prevDeals, cc, steamId });
                     return;
                 }
 
