@@ -51,59 +51,32 @@ export default {
       return Response.redirect(loginUrl, 302);
     }
 
-    // action=callback → Steam puede devolver params por GET o POST
+    // action=callback → Steam devuelve params por GET (query string)
     if (action === 'callback') {
-      // Debug: ver qué mandó Steam (temporal, borrar después)
-      const debugInfo = {
-        method: request.method,
-        contentType: request.headers.get('content-type'),
-        urlQuery: Object.fromEntries(url.searchParams),
-      };
-
       try {
-        // Leer openid params: primero del POST body, fallback al query string
-        let openidParams = new URLSearchParams();
+        // Usar el query string crudo para preservar la firma de Steam
+        const rawQuery = url.searchParams.toString();
 
-        if (request.method === 'POST') {
-          const postBody = await request.text();
-          debugInfo.postBody = postBody.substring(0, 2000);
-          const postParams = new URLSearchParams(postBody);
-          for (const [key, value] of postParams) {
-            if (key.startsWith('openid.')) openidParams.set(key, value);
-          }
-        }
-
-        // Si no encontró params en POST, buscar en query string
-        if (!openidParams.has('openid.mode')) {
-          for (const [key, value] of url.searchParams) {
-            if (key.startsWith('openid.')) openidParams.set(key, value);
-          }
-        }
-
-        debugInfo.openidParamsFound = Object.fromEntries(openidParams);
-
-        // Si no hay params, mostrar debug
-        if (!openidParams.has('openid.mode')) {
-          console.error('OpenID callback: no params found', JSON.stringify(debugInfo));
+        if (!rawQuery.includes('openid.mode=id_res')) {
           return new Response(
-            `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>Debug: OpenID Callback</h2><pre>${JSON.stringify(debugInfo, null, 2)}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
+            `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>Error: modo inesperado</h2><pre>${rawQuery}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
             { headers: { 'Content-Type': 'text/html' } }
           );
         }
 
-        // Verificar con Steam
-        openidParams.set('openid.mode', 'check_authentication');
+        // Solo cambiar openid.mode=id_res por check_authentication
+        // Sin re-parsear con URLSearchParams (preserva la firma)
+        const verifyBody = rawQuery.replace('openid.mode=id_res', 'openid.mode=check_authentication');
 
         const verifyRes = await fetch(STEAM_OPENID, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: openidParams.toString()
+          body: verifyBody
         });
         const verifyText = await verifyRes.text();
-        debugInfo.verifyResult = verifyText;
 
         if (verifyText.includes('is_valid:true')) {
-          const claimedId = openidParams.get('openid.claimed_id');
+          const claimedId = url.searchParams.get('openid.claimed_id');
           const match = claimedId.match(/\/id\/(\d+)$/);
           if (match) {
             const steamId = match[1];
@@ -111,14 +84,12 @@ export default {
           }
         }
 
-        console.error('OpenID verify failed:', JSON.stringify(debugInfo));
         return new Response(
-          `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>OpenID Verification Failed</h2><pre>${JSON.stringify(debugInfo, null, 2)}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
+          `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>OpenID Verification Failed</h2><pre>verifyResult:\n${verifyText}\n\nrawQuery:\n${rawQuery}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
           { headers: { 'Content-Type': 'text/html' } }
         );
 
       } catch (e) {
-        console.error('OpenID callback error:', e.message);
         return new Response(
           `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>OpenID Error</h2><pre>${e.message}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
           { headers: { 'Content-Type': 'text/html' } }
