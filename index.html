@@ -1358,7 +1358,6 @@
             });
 
             // Auto-load cached deals if steamId is available (no API key required)
-            const savedSteamId = localStorage.getItem('steamId');
             if (savedSteamId) {
                 const cachedDeals = getDealsCache();
                 const cc = localStorage.getItem('steamCountry') || 'us';
