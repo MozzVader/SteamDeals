@@ -54,19 +54,25 @@ export default {
     // action=callback → Steam devuelve params por GET (query string)
     if (action === 'callback') {
       try {
-        // Usar el query string crudo para preservar la firma de Steam
-        const rawQuery = url.searchParams.toString();
+        // Usar el query string crudo DIRECTO (sin searchParams)
+        // para preservar el encoding y orden exacto que Steam firmó
+        const rawSearch = url.search.substring(1);
 
-        if (!rawQuery.includes('openid.mode=id_res')) {
+        if (!rawSearch.includes('openid.mode=id_res')) {
           return new Response(
-            `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>Error: modo inesperado</h2><pre>${rawQuery}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
+            `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>Error: modo inesperado</h2><pre>${rawSearch}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
             { headers: { 'Content-Type': 'text/html' } }
           );
         }
 
-        // Solo cambiar openid.mode=id_res por check_authentication
-        // Sin re-parsear con URLSearchParams (preserva la firma)
-        const verifyBody = rawQuery.replace('openid.mode=id_res', 'openid.mode=check_authentication');
+        // Filtrar solo openid.* params, preservar encoding y orden original
+        // Cambiar openid.mode=id_res → openid.mode=check_authentication
+        const verifyParts = rawSearch.split('&')
+          .filter(p => p.startsWith('openid.'))
+          .map(p => p === 'openid.mode=id_res'
+            ? 'openid.mode=check_authentication'
+            : p);
+        const verifyBody = verifyParts.join('&');
 
         const verifyRes = await fetch(STEAM_OPENID, {
           method: 'POST',
@@ -76,8 +82,8 @@ export default {
         const verifyText = await verifyRes.text();
 
         if (verifyText.includes('is_valid:true')) {
-          const claimedId = url.searchParams.get('openid.claimed_id');
-          const match = claimedId.match(/\/id\/(\d+)$/);
+          // Extraer steamid del claimed_id
+          const match = rawSearch.match(/openid\.claimed_id=.*?\/id\/(\d+)/);
           if (match) {
             const steamId = match[1];
             return Response.redirect(`${FRONTEND_URL}?steamid=${steamId}`, 302);
@@ -85,7 +91,7 @@ export default {
         }
 
         return new Response(
-          `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>OpenID Verification Failed</h2><pre>verifyResult:\n${verifyText}\n\nrawQuery:\n${rawQuery}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
+          `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>OpenID Verification Failed</h2><pre>verifyResult:\n${verifyText}\n\nverifyBody:\n${verifyBody}\n\nrawSearch:\n${rawSearch}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
           { headers: { 'Content-Type': 'text/html' } }
         );
 
