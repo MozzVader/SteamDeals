@@ -1190,6 +1190,17 @@
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') closeCart();
             });
+
+            // Auto-load cached deals if steamId and apiKey are available
+            const savedSteamId = localStorage.getItem('steamId');
+            if (savedSteamId && localStorage.getItem('steamApiKey')) {
+                const cachedDeals = getDealsCache();
+                const cc = localStorage.getItem('steamCountry') || 'us';
+                if (cachedDeals && isCacheFresh(cachedDeals) && cachedDeals.steamId === savedSteamId && cachedDeals.country === cc) {
+                    showCachedResults(cachedDeals);
+                    document.getElementById('status').innerHTML = '<span style="color: var(--fg-dim)">Datos cacheados. Presioná "Buscar Ofertas" para actualizar.</span>';
+                }
+            }
         };
 
         // ── Cart functions ──
