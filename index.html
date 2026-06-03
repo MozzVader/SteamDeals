@@ -166,6 +166,50 @@
             box-shadow: none;
         }
 
+        .steam-user-info {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border: 1px solid #1b2838;
+            background: #1b2838;
+            border-radius: 0;
+            flex-shrink: 0;
+        }
+
+        .steam-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 0;
+            border: 1px solid #2a475e;
+        }
+
+        .steam-user-info span {
+            color: #c7d5e0;
+            font-size: 13px;
+            font-weight: 600;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .steam-logout-btn {
+            padding: 4px 6px;
+            border: none;
+            background: transparent;
+            color: #667;
+            cursor: pointer;
+            font-size: 12px;
+            transition: color 0.2s;
+        }
+
+        .steam-logout-btn:hover {
+            color: var(--danger);
+            background: transparent;
+            box-shadow: none;
+        }
+
         /* ── Main content ── */
         .main {
             max-width: 1100px;
@@ -1095,6 +1139,13 @@
                 <i class="fa-brands fa-steam"></i>
                 Steam
             </a>
+            <div id="steamUserInfo" style="display:none" class="steam-user-info">
+                <img id="steamAvatar" class="steam-avatar" src="" alt="">
+                <span id="steamName"></span>
+                <button id="steamLogout" class="steam-logout-btn" title="Cerrar sesión">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                </button>
+            </div>
             <button onclick="startTracking()">Buscar Ofertas</button>
         </div>
     </div>
@@ -1179,6 +1230,40 @@
         let allDeals = [];
         let cart = {}; // { appId: { name, steamPrice, imgUrl } }
 
+        // ── Steam Profile (avatar + nombre) ──
+        async function loadSteamProfile(steamId) {
+            try {
+                const res = await fetch(`${WORKER_URL}?mode=profile&steamid=${steamId}`);
+                const data = await res.json();
+                if (data.name || data.avatar) {
+                    document.getElementById('steamLoginBtn').style.display = 'none';
+                    document.getElementById('steamUserInfo').style.display = 'inline-flex';
+                    if (data.avatar) {
+                        document.getElementById('steamAvatar').src = data.avatar;
+                    }
+                    if (data.name) {
+                        document.getElementById('steamName').textContent = data.name;
+                    }
+                    localStorage.setItem('steamProfile', JSON.stringify(data));
+                }
+            } catch (e) {
+                console.warn('No se pudo cargar perfil de Steam:', e);
+            }
+        }
+
+        function steamLogout() {
+            localStorage.removeItem('steamId');
+            localStorage.removeItem('steamProfile');
+            document.getElementById('steamIdInput').value = '';
+            document.getElementById('steamLoginBtn').style.display = 'inline-flex';
+            document.getElementById('steamUserInfo').style.display = 'none';
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('status').innerText = '';
+            document.getElementById('toolbar').classList.remove('visible');
+            document.getElementById('progress-container').style.display = 'none';
+            allDeals = [];
+        }
+
         window.onload = function() {
             // Detectar steamid del callback de Steam OpenID
             const urlParams = new URLSearchParams(window.location.search);
@@ -1197,6 +1282,8 @@
                 window.history.replaceState({}, '', newUrl);
                 // Auto-buscar ofertas despues del login
                 startTracking();
+                // Cargar perfil de Steam (avatar + nombre)
+                loadSteamProfile(steamIdFromUrl);
             }
 
             if (loginError) {
@@ -1213,6 +1300,23 @@
             if (localStorage.getItem('steamApiKey')) document.getElementById('apiKeyInput').value = localStorage.getItem('steamApiKey');
             if (localStorage.getItem('steamCountry')) document.getElementById('countryInput').value = localStorage.getItem('steamCountry');
 
+            // Si ya hay steamId guardado, cargar perfil cacheado rapido
+            const savedSteamId = localStorage.getItem('steamId');
+            if (savedSteamId && !steamIdFromUrl) {
+                // Mostrar perfil cacheado al instante (sin esperar fetch)
+                try {
+                    const cachedProfile = JSON.parse(localStorage.getItem('steamProfile'));
+                    if (cachedProfile && (cachedProfile.name || cachedProfile.avatar)) {
+                        document.getElementById('steamLoginBtn').style.display = 'none';
+                        document.getElementById('steamUserInfo').style.display = 'inline-flex';
+                        if (cachedProfile.avatar) document.getElementById('steamAvatar').src = cachedProfile.avatar;
+                        if (cachedProfile.name) document.getElementById('steamName').textContent = cachedProfile.name;
+                    }
+                } catch(e) {}
+                // Refrescar perfil en background
+                loadSteamProfile(savedSteamId);
+            }
+
             // Load cart from localStorage
             try {
                 const savedCart = localStorage.getItem('steamDealsCart');
@@ -1225,6 +1329,10 @@
 
             document.getElementById('searchInput').addEventListener('input', renderDeals);
             document.getElementById('sortSelect').addEventListener('change', renderDeals);
+
+            // Steam logout
+            document.getElementById('steamLogout').addEventListener('click', steamLogout);
+
             const slider = document.getElementById('minDiscountInput');
             const sliderVal = document.getElementById('minDiscountValue');
             slider.addEventListener('input', () => {

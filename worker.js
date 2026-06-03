@@ -106,6 +106,49 @@ export default {
       }
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // mode=profile: obtiene avatar + nombre del perfil público de Steam
+    // ══════════════════════════════════════════════════════════════
+    if (mode === 'profile') {
+      const steamId = url.searchParams.get('steamid');
+      if (!steamId) return new Response('Faltan datos', { status: 400, headers: CORS });
+
+      try {
+        const profileUrl = `https://steamcommunity.com/profiles/${steamId}`;
+        const res = await fetch(profileUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9'
+          }
+        });
+
+        if (!res.ok) {
+          return new Response(JSON.stringify({ error: `HTTP ${res.status}` }), { status: res.status, headers: CORS });
+        }
+
+        const html = await res.text();
+
+        // Extraer nombre: <span class="actual_persona_name">...</span>
+        const nameMatch = html.match(/<span[^>]*class="actual_persona_name"[^>]*>([^<]+)<\/span>/);
+        // Extraer avatar: <img src="https://avatars.steamstatic.com/...">
+        const avatarMatch = html.match(/<img[^>]*(?:class="playerAvatarAutoSize")[^>]*src="([^"]+avatars\.steamstatic\.com[^"]+)"/);
+
+        if (nameMatch || avatarMatch) {
+          return new Response(JSON.stringify({
+            name: nameMatch ? nameMatch[1].trim() : null,
+            avatar: avatarMatch ? avatarMatch[1] : null,
+            steamId: steamId
+          }), { headers: CORS });
+        }
+
+        return new Response(JSON.stringify({ error: 'Perfil no encontrado o privado' }), { status: 404, headers: CORS });
+
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
+      }
+    }
+
     // ── Best price from appdetails (individual or package) ──
     function findBestPrice(appData, cc) {
       if (appData.price_overview && appData.price_overview.discount_percent > 0) {
