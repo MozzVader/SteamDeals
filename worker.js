@@ -51,40 +51,79 @@ export default {
       return Response.redirect(loginUrl, 302);
     }
 
-    // action=callback → Steam devuelve los openid params por POST (form body)
+    // action=callback → Steam puede devolver params por GET o POST
     if (action === 'callback') {
+      // Debug: ver qué mandó Steam (temporal, borrar después)
+      const debugInfo = {
+        method: request.method,
+        contentType: request.headers.get('content-type'),
+        urlQuery: Object.fromEntries(url.searchParams),
+      };
+
       try {
-        // Leer los openid params del POST body
-        const postBody = await request.text();
-        const postParams = new URLSearchParams(postBody);
+        // Leer openid params: primero del POST body, fallback al query string
+        let openidParams = new URLSearchParams();
+
+        if (request.method === 'POST') {
+          const postBody = await request.text();
+          debugInfo.postBody = postBody.substring(0, 2000);
+          const postParams = new URLSearchParams(postBody);
+          for (const [key, value] of postParams) {
+            if (key.startsWith('openid.')) openidParams.set(key, value);
+          }
+        }
+
+        // Si no encontró params en POST, buscar en query string
+        if (!openidParams.has('openid.mode')) {
+          for (const [key, value] of url.searchParams) {
+            if (key.startsWith('openid.')) openidParams.set(key, value);
+          }
+        }
+
+        debugInfo.openidParamsFound = Object.fromEntries(openidParams);
+
+        // Si no hay params, mostrar debug
+        if (!openidParams.has('openid.mode')) {
+          console.error('OpenID callback: no params found', JSON.stringify(debugInfo));
+          return new Response(
+            `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>Debug: OpenID Callback</h2><pre>${JSON.stringify(debugInfo, null, 2)}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
+            { headers: { 'Content-Type': 'text/html' } }
+          );
+        }
 
         // Verificar con Steam
-        postParams.set('openid.mode', 'check_authentication');
+        openidParams.set('openid.mode', 'check_authentication');
 
         const verifyRes = await fetch(STEAM_OPENID, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: postParams.toString()
+          body: openidParams.toString()
         });
         const verifyText = await verifyRes.text();
+        debugInfo.verifyResult = verifyText;
 
         if (verifyText.includes('is_valid:true')) {
-          const claimedId = postParams.get('openid.claimed_id');
+          const claimedId = openidParams.get('openid.claimed_id');
           const match = claimedId.match(/\/id\/(\d+)$/);
           if (match) {
             const steamId = match[1];
-            // Redirigir al frontend con el steamid
             return Response.redirect(`${FRONTEND_URL}?steamid=${steamId}`, 302);
           }
         }
 
-        console.error('OpenID verify failed:', verifyText);
-      } catch (e) {
-        console.error('OpenID verify error:', e.message);
-      }
+        console.error('OpenID verify failed:', JSON.stringify(debugInfo));
+        return new Response(
+          `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>OpenID Verification Failed</h2><pre>${JSON.stringify(debugInfo, null, 2)}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
+          { headers: { 'Content-Type': 'text/html' } }
+        );
 
-      // Falló la verificación
-      return Response.redirect(`${FRONTEND_URL}?login_error=1`, 302);
+      } catch (e) {
+        console.error('OpenID callback error:', e.message);
+        return new Response(
+          `<html><body style="background:#111;color:#eee;font-family:monospace;padding:20px"><h2>OpenID Error</h2><pre>${e.message}</pre><p><a href="${FRONTEND_URL}" style="color:#66c0f4">Volver</a></p></body></html>`,
+          { headers: { 'Content-Type': 'text/html' } }
+        );
+      }
     }
 
     // ── Best price from appdetails (individual or package) ──
