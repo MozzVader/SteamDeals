@@ -1659,14 +1659,8 @@
 
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
-                // Clear cached results before fresh fetch to avoid duplicates
-                if (hasCache) {
-                    resultsDiv.innerHTML = '';
-                    allDeals = [];
-                }
-
                 const lotes = chunkArray(appIds, 8);
-                let toolbarShown = false;
+                const freshDeals = []; // Accumulate silently, swap at end
                 const failedAppIdsPerBatch = [];
 
                 for (let i = 0; i < lotes.length; i++) {
@@ -1685,26 +1679,7 @@
                             const deals = data.deals || [];
                             const batchFailed = data.failedAppIds || [];
                             failedAppIdsPerBatch.push(...batchFailed);
-                            allDeals.push(...deals);
-
-                            // Show toolbar on first batch with deals
-                            if (deals.length > 0 && !toolbarShown) {
-                                toolbarShown = true;
-                                toolbar.classList.add('visible');
-                                document.getElementById('searchInput').value = '';
-                                document.getElementById('sortSelect').value = 'discount-desc';
-                                document.getElementById('minDiscountInput').value = '0';
-                                document.getElementById('minDiscountValue').textContent = '0';
-                            }
-
-                            // Progressive render: append cards as they arrive
-                            deals.forEach(deal => {
-                                const card = buildCard(deal);
-                                resultsDiv.appendChild(card);
-                            });
-
-                            updateCount();
-                            updateCartUI();
+                            freshDeals.push(...deals);
                         }
                     } catch (batchErr) {
                         console.error(`Error en lote ${i + 1}:`, batchErr);
@@ -1713,6 +1688,19 @@
                     if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
                 }
 
+                // ── Swap: replace cached cards with fresh results at once ──
+                allDeals = freshDeals;
+                resultsDiv.innerHTML = '';
+                if (allDeals.length > 0) {
+                    toolbar.classList.add('visible');
+                    document.getElementById('searchInput').value = '';
+                    document.getElementById('sortSelect').value = 'discount-desc';
+                    document.getElementById('minDiscountInput').value = '0';
+                    document.getElementById('minDiscountValue').textContent = '0';
+                    allDeals.forEach(deal => resultsDiv.appendChild(buildCard(deal)));
+                    updateCount();
+                    updateCartUI();
+                }
                 progressContainer.style.display = 'none';
 
                 // ── Retry: reintentar juegos que fallaron por rate limit ──
