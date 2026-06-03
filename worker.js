@@ -51,40 +51,40 @@ export default {
       return Response.redirect(loginUrl, 302);
     }
 
-    // action=callback → verifica con Steam y extrae Steam64 ID
+    // action=callback → Steam devuelve los openid params por POST (form body)
     if (action === 'callback') {
-      // Verificar la respuesta con Steam
-      const verifyParams = new URLSearchParams();
-      for (const [key, value] of url.searchParams) {
-        if (key.startsWith('openid.')) {
-          verifyParams.set(key, value);
-        }
-      }
-      verifyParams.set('openid.mode', 'check_authentication');
-
       try {
+        // Leer los openid params del POST body
+        const postBody = await request.text();
+        const postParams = new URLSearchParams(postBody);
+
+        // Verificar con Steam
+        postParams.set('openid.mode', 'check_authentication');
+
         const verifyRes = await fetch(STEAM_OPENID, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: verifyParams.toString()
+          body: postParams.toString()
         });
         const verifyText = await verifyRes.text();
 
         if (verifyText.includes('is_valid:true')) {
-          const claimedId = url.searchParams.get('openid.claimed_id');
+          const claimedId = postParams.get('openid.claimed_id');
           const match = claimedId.match(/\/id\/(\d+)$/);
           if (match) {
             const steamId = match[1];
             // Redirigir al frontend con el steamid
-            return Response.redirect(`${FRONTEND_URL}/?steamid=${steamId}`, 302);
+            return Response.redirect(`${FRONTEND_URL}?steamid=${steamId}`, 302);
           }
         }
+
+        console.error('OpenID verify failed:', verifyText);
       } catch (e) {
         console.error('OpenID verify error:', e.message);
       }
 
       // Falló la verificación
-      return Response.redirect(`${FRONTEND_URL}/?login_error=1`, 302);
+      return Response.redirect(`${FRONTEND_URL}?login_error=1`, 302);
     }
 
     // ── Best price from appdetails (individual or package) ──
