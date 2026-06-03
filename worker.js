@@ -131,8 +131,8 @@ export default {
 
         // Extraer nombre: <span class="actual_persona_name">...</span>
         const nameMatch = html.match(/<span[^>]*class="actual_persona_name"[^>]*>([^<]+)<\/span>/);
-        // Extraer avatar: <img src="https://avatars.steamstatic.com/...">
-        const avatarMatch = html.match(/<img[^>]*(?:class="playerAvatarAutoSize")[^>]*src="([^"]+avatars\.steamstatic\.com[^"]+)"/);
+        // Extraer avatar: <meta property="og:image" content="...">
+        const avatarMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]+)"/);
 
         if (nameMatch || avatarMatch) {
           return new Response(JSON.stringify({
