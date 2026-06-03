@@ -1714,81 +1714,106 @@
                 }
                 progressContainer.style.display = 'none';
 
-                // ── Retry: reintentar juegos que fallaron por rate limit ──
-                const failedAppIds = failedAppIdsPerBatch;
+                // ── Retry cascade: up to 3 rounds with increasing delays ──
+                let stillFailed = failedAppIdsPerBatch;
+                let totalRetryDeals = 0;
+                const retryRounds = [
+                    { waitSec: 10, batchSize: 2, delayMs: 2000 },
+                    { waitSec: 15, batchSize: 1, delayMs: 3000 },
+                    { waitSec: 20, batchSize: 1, delayMs: 5000 }
+                ];
 
-                if (failedAppIds.length > 0) {
-                    // Show retry banner
-                    const retryBanner = document.createElement('div');
+                for (let round = 0; round < retryRounds.length && stillFailed.length > 0; round++) {
+                    const config = retryRounds[round];
+                    const roundNum = round + 1;
+                    const totalRounds = retryRounds.length;
+
+                    // Show/update retry banner
+                    let retryBanner = document.getElementById('retry-banner');
+                    if (!retryBanner) {
+                        retryBanner = document.createElement('div');
+                        retryBanner.className = 'retry-banner';
+                        retryBanner.id = 'retry-banner';
+                        resultsDiv.insertBefore(retryBanner, resultsDiv.firstChild);
+                    }
                     retryBanner.className = 'retry-banner';
-                    retryBanner.id = 'retry-banner';
                     retryBanner.innerHTML = `
                         <span class="retry-icon">⟳</span>
-                        <span class="retry-text">Reintentando ${failedAppIds.length} juegos que fallaron por rate limit de Steam...</span>
-                        <span class="retry-counter" id="retry-counter">Esperando recuperación...</span>
+                        <span class="retry-text">Ronda ${roundNum}/${totalRounds}: Reintentando ${stillFailed.length} juegos${round > 0 ? ' que siguen fallando' : ' por rate limit'}...</span>
+                        <span class="retry-counter" id="retry-counter">Esperando ${config.waitSec}s...</span>
                     `;
-                    resultsDiv.insertBefore(retryBanner, resultsDiv.firstChild);
 
-                    // Wait for Steam token bucket to recover (10 seconds)
+                    // Wait for Steam token bucket to recover
                     const retryCounter = document.getElementById('retry-counter');
-                    for (let w = 10; w > 0; w--) {
+                    for (let w = config.waitSec; w > 0; w--) {
                         retryCounter.innerText = `Esperando ${w}s...`;
                         await new Promise(r => setTimeout(r, 1000));
                     }
 
-                    retryCounter.innerText = `0/${failedAppIds.length}`;
+                    retryCounter.innerText = `0/${stillFailed.length}`;
 
-                    // Retry in batches of 2 with 2s delay between batches
-                    const retryBatches = chunkArray(failedAppIds, 2);
-                    let retryDealsCount = 0;
+                    // Retry in batches
+                    const retryBatches = chunkArray(stillFailed, config.batchSize);
+                    let roundDealsCount = 0;
+                    const nextFailed = [];
 
                     for (let i = 0; i < retryBatches.length; i++) {
-                        retryCounter.innerText = `${i * 2}/${failedAppIds.length}`;
+                        const processed = Math.min((i + 1) * config.batchSize, stillFailed.length);
+                        retryCounter.innerText = `${processed}/${stillFailed.length}`;
                         try {
                             const retryUrl = `${WORKER_URL}?mode=retry&appids=${retryBatches[i].join(',')}&cc=${cc}`;
                             const retryRes = await fetch(retryUrl);
                             if (retryRes.ok) {
                                 const retryData = await retryRes.json();
                                 const retryDeals = retryData.deals || [];
+                                const batchFailed = retryData.failedAppIds || [];
+                                nextFailed.push(...batchFailed);
                                 if (retryDeals.length > 0) {
-                                    retryDealsCount += retryDeals.length;
+                                    roundDealsCount += retryDeals.length;
+                                    totalRetryDeals += retryDeals.length;
                                     retryDeals.forEach(deal => {
                                         allDeals.push(deal);
                                         const card = buildCard(deal);
                                         card.style.animation = 'fadeSlideIn 0.5s ease both';
                                         resultsDiv.appendChild(card);
                                     });
-                                    if (!toolbar.classList.contains('visible')) {
-                                        toolbar.classList.add('visible');
-                                    }
                                     updateCount();
                                     updateCartUI();
                                 }
                             }
                         } catch(e) {
-                            console.error('Retry error:', e);
+                            console.error(`Retry round ${roundNum} error:`, e);
                         }
-                        if (i < retryBatches.length - 1) await new Promise(r => setTimeout(r, 2000));
+                        if (i < retryBatches.length - 1) await new Promise(r => setTimeout(r, config.delayMs));
                     }
 
-                    // Update banner to done state
-                    retryBanner.className = 'retry-banner retry-done';
-                    const retryIcon = retryBanner.querySelector('.retry-icon');
-                    const retryText = retryBanner.querySelector('.retry-text');
-                    retryIcon.innerText = '✓';
-                    if (retryDealsCount > 0) {
-                        retryText.innerText = `Retry completado. +${retryDealsCount} deals recuperados.`;
+                    stillFailed = nextFailed;
+
+                    // Update banner for this round
+                    if (stillFailed.length > 0 && round < retryRounds.length - 1) {
+                        retryBanner.querySelector('.retry-counter').innerText = `${stillFailed.length} siguen fallando`;
+                        retryBanner.querySelector('.retry-text').innerText = `Ronda ${roundNum}: +${roundDealsCount} deals. Quedan ${stillFailed.length} por reintentar...`;
                     } else {
-                        retryText.innerText = `Retry completado. No se encontraron deals adicionales.`;
+                        // Final state
+                        retryBanner.className = 'retry-banner retry-done';
+                        retryBanner.querySelector('.retry-icon').innerText = '✓';
+                        if (totalRetryDeals > 0) {
+                            retryBanner.querySelector('.retry-text').innerText = `Retry completado (${roundNum} ronda${roundNum > 1 ? 's' : ''}). +${totalRetryDeals} deals recuperados.`;
+                        } else {
+                            retryBanner.querySelector('.retry-text').innerText = `Retry completado (${roundNum} ronda${roundNum > 1 ? 's' : ''}). No se encontraron deals adicionales.`;
+                        }
+                        if (stillFailed.length > 0) {
+                            retryBanner.querySelector('.retry-counter').innerText = `${stillFailed.length} sin poder verificar`;
+                        } else {
+                            retryBanner.querySelector('.retry-counter').innerText = '';
+                        }
+                        // Auto-hide after 8 seconds
+                        setTimeout(() => {
+                            retryBanner.style.transition = 'opacity 0.5s';
+                            retryBanner.style.opacity = '0';
+                            setTimeout(() => retryBanner.remove(), 500);
+                        }, 8000);
                     }
-                    retryCounter.innerText = `${failedAppIds.length}/${failedAppIds.length}`;
-
-                    // Auto-hide retry banner after 8 seconds
-                    setTimeout(() => {
-                        retryBanner.style.transition = 'opacity 0.5s';
-                        retryBanner.style.opacity = '0';
-                        setTimeout(() => retryBanner.remove(), 500);
-                    }, 8000);
                 }
 
                 setDealsCache(allDeals);
