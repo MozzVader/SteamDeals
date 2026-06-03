@@ -1448,6 +1448,7 @@
 
                 const lotes = chunkArray(appIds, 8);
                 let toolbarShown = false;
+                const failedAppIdsPerBatch = [];
 
                 for (let i = 0; i < lotes.length; i++) {
                     const lote = lotes[i];
@@ -1463,6 +1464,8 @@
                         if (dealsRes.ok) {
                             const data = await dealsRes.json();
                             const deals = data.deals || [];
+                            const batchFailed = data.failedAppIds || [];
+                            failedAppIdsPerBatch.push(...batchFailed);
                             allDeals.push(...deals);
 
                             // Show toolbar on first batch with deals
@@ -1494,7 +1497,7 @@
                 progressContainer.style.display = 'none';
 
                 // ── Retry: reintentar juegos que fallaron por rate limit ──
-                const failedAppIds = appIds.filter(id => !allDeals.some(d => String(d.appId) === String(id)));
+                const failedAppIds = failedAppIdsPerBatch;
 
                 if (failedAppIds.length > 0) {
                     // Show retry banner

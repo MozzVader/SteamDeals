@@ -69,6 +69,7 @@ export default {
 
       const appIds = appIdsStr.split(',');
       const deals = [];
+      const failedAppIds = [];
       const dbg = debug ? {
         subrequests: 0,
         cacheHits: 0,
@@ -88,7 +89,10 @@ export default {
           const appdetailsMs = t1();
           if (debug) { dbg.subrequests++; gameDbg.calls.push({ api: 'appdetails', cached: false, ms: appdetailsMs, ok: steamRes.ok }); }
 
-          if (!steamRes.ok && debug) { dbg.errors.push({ appId, api: 'appdetails', error: 'HTTP ' + steamRes.status }); }
+          if (!steamRes.ok) {
+            if (debug) { dbg.errors.push({ appId, api: 'appdetails', error: 'HTTP ' + steamRes.status }); }
+            failedAppIds.push(appId);
+          }
 
           if (steamRes.ok) {
             const steamData = await steamRes.json();
@@ -205,13 +209,14 @@ export default {
         } catch (e) {
           if (debug) { dbg.errors.push({ appId, api: 'appdetails', error: e.message }); }
           console.error("Error procesando juego " + appId + ": " + e.message);
+          failedAppIds.push(appId);
         }
         if (debug) { gameDbg.totalMs = gameDbg.calls.reduce((s, c) => s + c.ms, 0); dbg.games.push(gameDbg); }
         await new Promise(r => setTimeout(r, 350));
       }
 
       const totalMs = totalStart();
-      const response = { deals };
+      const response = { deals, failedAppIds };
       if (debug) {
         response._debug = {
           ...dbg,
@@ -232,6 +237,7 @@ export default {
 
       const appIds = appIdsStr.split(',');
       const deals = [];
+      const failedAppIds = [];
       const dbg = debug ? {
         subrequests: 0,
         cacheHits: 0,
@@ -252,7 +258,10 @@ export default {
           const appdetailsMs = t1();
           if (debug) { dbg.subrequests++; gameDbg.calls.push({ api: 'appdetails', cached: false, ms: appdetailsMs, ok: steamRes.ok }); }
 
-          if (!steamRes.ok && debug) { dbg.errors.push({ appId, api: 'appdetails', error: 'HTTP ' + steamRes.status }); }
+          if (!steamRes.ok) {
+            if (debug) { dbg.errors.push({ appId, api: 'appdetails', error: 'HTTP ' + steamRes.status }); }
+            failedAppIds.push(appId);
+          }
 
           if (steamRes.ok) {
             const steamData = await steamRes.json();
@@ -369,6 +378,7 @@ export default {
         } catch (e) {
           if (debug) { dbg.errors.push({ appId, api: 'appdetails', error: e.message }); }
           console.error("Error procesando juego " + appId + ": " + e.message);
+          failedAppIds.push(appId);
         }
         if (debug) { gameDbg.totalMs = gameDbg.calls.reduce((s, c) => s + c.ms, 0); dbg.games.push(gameDbg); }
         // 2 second delay between requests to avoid Steam rate limit
@@ -376,7 +386,7 @@ export default {
       }
 
       const totalMs = totalStart();
-      const response = { deals };
+      const response = { deals, failedAppIds };
       if (debug) {
         response._debug = {
           ...dbg,
