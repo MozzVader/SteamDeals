@@ -1827,17 +1827,24 @@
                     <div style="display:flex;gap:16px;margin-bottom:16px;">
                         <div style="flex:1;">
                             <h4 style="color:var(--accent);font-size:0.95rem;margin-bottom:6px;">
-                                <i class="fa-solid fa-paste" style="margin-right:4px;"></i> Opción 1: Importar JSON (instantáneo)
+                                <i class="fa-solid fa-bolt" style="margin-right:4px;"></i> Opción 1: Importar JSON (instantáneo)
                             </h4>
                             <div class="import-steps">
+                                <p style="margin:0 0 8px 0;"><strong>Método rápido — sin extensión:</strong></p>
                                 <ol>
-                                    <li>Instalá la extensión <strong>Augmented Steam</strong> en tu browser</li>
                                     <li>Andá a tu <a href="https://store.steampowered.com/wishlist/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Wishlist de Steam</a></li>
-                                    <li>Hacé click derecho en la página → "Export wishlist data"</li>
-                                    <li>Copiá el JSON y pegalo abajo</li>
+                                    <li>Abrí la <strong>Consola</strong> del navegador (F12 → Console)</li>
+                                    <li>Pegá el comando de abajo y presioná Enter</li>
+                                    <li>El JSON se copia al portapapeles → pegalo acá</li>
                                 </ol>
                             </div>
-                            <textarea class="import-textarea" id="importJsonInput" placeholder='Pegá el JSON de Augmented Steam acá...&#10;&#10;Ejemplo: { "12345": { "name": "Juego", "discount": 50, ... }, ... }'></textarea>
+                            <div class="import-actions" style="margin-top:0;margin-bottom:12px;">
+                                <button class="btn-secondary" id="copyConsoleCmdBtn" style="border-color:var(--accent);color:var(--accent);font-size:0.8rem;">
+                                    <i class="fa-solid fa-copy" style="margin-right:4px;"></i> Copiar comando para consola
+                                </button>
+                                <span id="copyCmdFeedback" style="font-size:0.8rem;color:var(--accent);display:none;">Copiado</span>
+                            </div>
+                            <textarea class="import-textarea" id="importJsonInput" placeholder='Pegá el JSON acá...&#10;&#10;Ejemplo: { "12345": { "name": "Juego", "discount": 50, ... }, ... }'></textarea>
                             <div id="importError" class="import-error" style="display:none;"></div>
                             <div class="import-actions">
                                 <button onclick="processImportedJson()">
@@ -1867,6 +1874,28 @@
             // Scroll to import panel
             panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
+            // Handler para botón "copiar comando de consola"
+            document.getElementById('copyConsoleCmdBtn').addEventListener('click', () => {
+                const steamId = document.getElementById('steamIdInput').value.trim();
+                const cmd = `fetch('/wishlist/profiles/${steamId}/wishlistdata/').then(r=>r.json()).then(d=>{copy(JSON.stringify(d));console.log('JSON copiado al portapapeles. '+Object.keys(d).length+' juegos en wishlist.')});`;
+                navigator.clipboard.writeText(cmd).then(() => {
+                    const fb = document.getElementById('copyCmdFeedback');
+                    fb.style.display = 'inline';
+                    setTimeout(() => fb.style.display = 'none', 2000);
+                }).catch(() => {
+                    // Fallback: seleccionar de un textarea temporal
+                    const ta = document.createElement('textarea');
+                    ta.value = cmd;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    const fb = document.getElementById('copyCmdFeedback');
+                    fb.style.display = 'inline';
+                    setTimeout(() => fb.style.display = 'none', 2000);
+                });
+            });
+
             // Handler para botón de fallback con API Key
             document.getElementById('fallbackApiKeyBtn').addEventListener('click', () => {
                 const key = document.getElementById('apiKeyInput').value.trim();
@@ -1877,8 +1906,10 @@
                     return;
                 }
                 errEl.style.display = 'none';
+                localStorage.setItem('steamApiKey', key);
                 hideImportPanel();
-                // Ejecutar startTracking — ahora tiene API key y wlBlocked=true, así que cae al fallback
+                // Reiniciar búsqueda — sessionStorage recuerda que wishlistdata fue bloqueado,
+                // así que salta directo al fallback con la API key recién ingresada.
                 startTracking();
             });
         }
@@ -2193,91 +2224,37 @@
 
             try {
                 // ══════════════════════════════════════════════════════════════
-                // FASTEST PATH: Direct browser fetch de wishlistdata
-                // Augmented Steam funciona porque hace ESTO desde el browser.
-                // Si Steam permite CORS en este endpoint, obtenemos todo en 1
-                // request desde la IP del usuario (nunca bloqueada). Si CORS
-                // bloquea, caemos al worker (que será bloqueado por Steam).
+                // TRY wishlistdata via worker (1 request → full wishlist + prices)
+                // Steam bloquea IPs de cloud → 503. Si fue bloqueado esta sesión,
+                // lo recordamos en sessionStorage para no reintentar inútilmente.
                 // ══════════════════════════════════════════════════════════════
                 let wlDataBody = null;
-                let wlBlocked = false;
-                let directSuccess = false;
+                const wlBlockedKey = `wlBlocked_${steamId}`;
+                const wasWlBlocked = sessionStorage.getItem(wlBlockedKey) === 'true';
 
-                try {
-                    const directUrl = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/`;
-                    const directRes = await fetch(directUrl, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json, text/javascript, */*; q=0.01',
-                        },
-                        credentials: 'omit'
-                    });
+                if (!wasWlBlocked) {
+                    try {
+                        const wlDataUrl = `${WORKER_URL}?mode=wishlistdata&steamid=${steamId}&cc=${cc}`;
+                        const wlDataRes = await fetch(wlDataUrl);
 
-                    if (directRes.ok) {
-                        const raw = await directRes.text();
-                        // Verificar que es JSON y no HTML redirect
-                        if (!raw.trim().startsWith('<')) {
-                            const parsed = JSON.parse(raw);
-                            const games = [];
-                            for (const [appId, info] of Object.entries(parsed)) {
-                                games.push({
-                                    appId,
-                                    name: info.name || '',
-                                    discount_percent: info.discount_percent || 0,
-                                    original_price: info.original_price || 0,
-                                    final_price: info.final_price || 0,
-                                    currency: info.currency || 'USD'
-                                });
-                            }
-                            if (games.length > 0) {
-                                wlDataBody = { totalGames: games.length, games };
-                                directSuccess = true;
-                                console.log(`Direct browser fetch OK: ${games.length} juegos`);
+                        if (wlDataRes.ok) {
+                            wlDataBody = await wlDataRes.json();
+                            console.log(`Wishlistdata OK: ${wlDataBody.totalGames || '?'} juegos`);
+                        } else if (wlDataRes.status === 503) {
+                            const errData = await wlDataRes.json().catch(() => ({}));
+                            if (errData.blocked) {
+                                sessionStorage.setItem(wlBlockedKey, 'true');
+                                console.warn('Steam bloqueó wishlistdata (IP de cloud). Usando fallback.');
                             }
                         }
-                    } else {
-                        console.log(`Direct fetch: HTTP ${directRes.status} (CORS o bloqueado)`);
+                    } catch (wlErr) {
+                        console.error('Wishlistdata error:', wlErr.message);
                     }
-                } catch (directErr) {
-                    // CORS block, network error, etc. → normal, caemos al worker
-                    console.log(`Direct fetch falló (esperado si CORS bloquea):`, directErr.message);
-                }
-
-                // ══════════════════════════════════════════════════════════════
-                // WORKER PATH: Si el direct fetch no funcionó, intentar vía worker
-                // ══════════════════════════════════════════════════════════════
-                if (!directSuccess) {
-                    const wlDataUrl = `${WORKER_URL}?mode=wishlistdata&steamid=${steamId}&cc=${cc}`;
-                    const wlDataRes = await fetch(wlDataUrl);
-
-                    if (wlDataRes.ok) {
-                        wlDataBody = await wlDataRes.json();
-                    } else if (wlDataRes.status === 503) {
-                        try {
-                            const errData = await wlDataRes.json();
-                            if (errData.blocked) {
-                                wlBlocked = true;
-                                console.warn('Steam bloqueó wishlistdata:', errData.error);
-                            }
-                        } catch(e) {}
-                    }
-                }
-
-                if (wlBlocked) {
-                    // Si hay API key, saltar directamente al fallback (método viejo)
-                    // Si no hay API key, mostrar panel de importación
-                    if (!apiKey) {
-                        progressContainer.style.display = 'none';
-                        statusDiv.innerText = '';
-                        showImportPanel({ prevDeals, cc, steamId });
-                        return;
-                    }
-                    // Hay API key → caer al fallback de abajo (no return)
-                    console.log('Wishlistdata bloqueado, usando fallback con API key...');
+                } else {
+                    console.log('Wishlistdata ya fue bloqueado esta sesión, saltando al fallback.');
                 }
 
                 if (wlDataBody && wlDataBody.games && Array.isArray(wlDataBody.games) && wlDataBody.games.length > 0) {
-                    fastPath = true;
                     const totalGames = wlDataBody.totalGames || wlDataBody.games.length;
 
                     // Filtrar juegos en oferta
@@ -2403,17 +2380,17 @@
                 }
 
                 // ══════════════════════════════════════════════════════════════
-                // FALLBACK: Approach anterior (Wishlist API + per-game deals)
-                // Se usa si wishlistdata falla por otro motivo o devuelve datos vacíos.
+                // FALLBACK: Wishlist API + per-game deals
+                // Se usa si: wishlistdata fue bloqueado (503) o devolvió vacío.
                 // ══════════════════════════════════════════════════════════════
                 if (!apiKey) {
-                    // No hay API key → mostrar import panel también
                     progressContainer.style.display = 'none';
+                    statusDiv.innerText = '';
                     showImportPanel({ prevDeals, cc, steamId });
                     return;
                 }
 
-                console.log('Wishlistdata falló o vacío, usando fallback con Wishlist API...');
+                console.log('Usando fallback: Wishlist API + batch deals...');
                 statusDiv.innerText = 'Obteniendo tu wishlist (método alternativo)...';
 
                 const wishlistUrl = `${WORKER_URL}?mode=wishlist&steamid=${steamId}&apikey=${apiKey}`;
