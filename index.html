@@ -1461,7 +1461,8 @@
                         const dealsRes = await fetch(dealsUrl);
 
                         if (dealsRes.ok) {
-                            const deals = await dealsRes.json();
+                            const data = await dealsRes.json();
+                            const deals = data.deals || [];
                             allDeals.push(...deals);
 
                             // Show toolbar on first batch with deals
