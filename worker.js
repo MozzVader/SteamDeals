@@ -1,12 +1,19 @@
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const action = url.searchParams.get('action');
     const mode = url.searchParams.get('mode');
 
     const CS_HEADERS = {
       'User-Agent': 'WishlistDeals/1.0 (github.com/MozzVader/SteamDeals)'
     };
     const CORS = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
+
+    // ── Steam OpenID config ──
+    const STEAM_OPENID = 'https://steamcommunity.com/openid/login';
+    const REALM = 'https://steamdeals.mozz05.workers.dev';
+    // URL donde está alojado el index.html (cambiar si es diferente)
+    const FRONTEND_URL = 'https://steamdeals.mozz05.workers.dev';
 
     // ── CC → Currency code mapping ──
     const CC_CURRENCY = {
@@ -24,6 +31,60 @@ export default {
     };
     function currencyForCc(cc) {
       return CC_CURRENCY[cc.toLowerCase()] || cc.toUpperCase();
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // Steam OpenID Login
+    // ══════════════════════════════════════════════════════════════
+
+    // action=login → redirige a Steam
+    if (action === 'login') {
+      const returnTo = encodeURIComponent(`${REALM}/?action=callback`);
+      const loginUrl = `${STEAM_OPENID}?` + new URLSearchParams({
+        'openid.ns': 'http://specs.openid.net/auth/2.0',
+        'openid.mode': 'checkid_setup',
+        'openid.return_to': returnTo,
+        'openid.realm': REALM,
+        'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
+        'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select'
+      }).toString();
+      return Response.redirect(loginUrl, 302);
+    }
+
+    // action=callback → verifica con Steam y extrae Steam64 ID
+    if (action === 'callback') {
+      // Verificar la respuesta con Steam
+      const verifyParams = new URLSearchParams();
+      for (const [key, value] of url.searchParams) {
+        if (key.startsWith('openid.')) {
+          verifyParams.set(key, value);
+        }
+      }
+      verifyParams.set('openid.mode', 'check_authentication');
+
+      try {
+        const verifyRes = await fetch(STEAM_OPENID, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: verifyParams.toString()
+        });
+        const verifyText = await verifyRes.text();
+
+        if (verifyText.includes('is_valid:true')) {
+          const claimedId = url.searchParams.get('openid.claimed_id');
+          const match = claimedId.match(/\/id\/(\d+)$/);
+          if (match) {
+            const steamId = match[1];
+            // Redirigir al frontend con el steamid
+            return Response.redirect(`${FRONTEND_URL}/?steamid=${steamId}`, 302);
+          }
+        }
+      } catch (e) {
+        console.error('OpenID verify error:', e.message);
+      }
+
+      // Falló la verificación
+      return Response.redirect(`${FRONTEND_URL}/?login_error=1`, 302);
     }
 
     // ── Best price from appdetails (individual or package) ──
