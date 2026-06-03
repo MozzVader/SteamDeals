@@ -356,6 +356,19 @@
             flex-shrink: 0;
             border: 1px solid var(--border);
         }
+        .cover-wrap {
+            width: 230px;
+            flex-shrink: 0;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            position: relative;
+        }
+        .cover-wrap .game-cover {
+            width: 100%;
+            height: auto;
+            display: block;
+            border: none;
+        }
 
         .game-info { flex: 1; min-width: 0; }
 
@@ -881,6 +894,85 @@
             color: var(--accent);
         }
 
+        /* ── Notifications summary ── */
+        .notif-summary {
+            margin-bottom: 16px;
+            animation: fadeSlideIn 0.35s ease both;
+        }
+        .notif-item {
+            background: var(--bg-raised);
+            padding: 10px 16px;
+            margin-bottom: 6px;
+            border-left: 4px solid var(--fg-dim);
+            font-size: 0.88rem;
+            color: var(--fg);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: opacity 0.4s;
+        }
+        .notif-item:last-child { margin-bottom: 0; }
+        .notif-item.notif-new       { border-left-color: var(--accent); }
+        .notif-item.notif-new .notif-icon { color: var(--accent); }
+        .notif-item.notif-cheaper   { border-left-color: #3b82f6; }
+        .notif-item.notif-cheaper .notif-icon { color: #3b82f6; }
+        .notif-item.notif-pricier   { border-left-color: #f97316; }
+        .notif-item.notif-pricier .notif-icon { color: #f97316; }
+        .notif-item.notif-gone      { border-left-color: var(--warn); }
+        .notif-item.notif-gone .notif-icon { color: var(--warn); }
+        .notif-item.notif-same      { border-left-color: var(--fg-dim); }
+        .notif-icon { font-size: 1rem; flex-shrink: 0; width: 24px; text-align: center; }
+        .notif-text { flex: 1; }
+        .notif-games {
+            color: var(--fg-dim);
+            font-size: 0.82rem;
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+        .notif-dismiss {
+            background: none;
+            border: none;
+            color: var(--fg-dim);
+            cursor: pointer;
+            font-size: 1.1rem;
+            padding: 0 4px;
+            transition: color 0.2s;
+        }
+        .notif-dismiss:hover { color: var(--fg); }
+
+        /* ── Image fallback ── */
+        .game-cover[src=""], .game-cover.on-error {
+            display: none;
+        }
+        .cover-fallback {
+            width: 100%;
+            height: 100%;
+            min-height: 85px;
+            background: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            color: #555;
+            font-size: 0.7rem;
+            text-align: center;
+            padding: 8px;
+            overflow: hidden;
+        }
+        .cover-fallback svg {
+            width: 32px;
+            height: 32px;
+            opacity: 0.4;
+        }
+        .cover-fallback-name {
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 0.65rem;
+        }
+
         /* ── Responsive ── */
         @media (max-width: 900px) {
             .header {
@@ -907,6 +999,9 @@
                 width: 100%;
                 max-height: 160px;
                 object-fit: cover;
+            }
+            .cover-wrap {
+                width: 100%;
             }
             .price-bars {
                 width: 100%;
@@ -1281,9 +1376,13 @@
             card.target = '_blank';
             card.rel = 'noopener noreferrer';
             card.title = `Ver ${deal.name} en Steam`;
+            const fallbackSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`;
             card.innerHTML = `
                 <div class="cart-check${inCart ? ' checked' : ''}" data-appid="${deal.appId}"></div>
-                <img class="game-cover" src="${imgUrl}" alt="${deal.name}" loading="lazy">
+                <div class="cover-wrap">
+                    <img class="game-cover" src="${imgUrl}" alt="${deal.name}" loading="lazy" onerror="this.classList.add('on-error');this.nextElementSibling.style.display='flex';">
+                    <div class="cover-fallback" style="display:none">${fallbackSvg}<div class="cover-fallback-name">${deal.name}</div></div>
+                </div>
                 <div class="game-info">
                     <div class="game-title-row">
                         <div class="game-title">${deal.name}</div>${deal.reviewScore != null && deal.reviewLabel ? `<div class="review-dot dot-${deal.reviewLabel}" data-tooltip="${deal.reviewScore}% positivo"></div>` : ''}
@@ -1391,6 +1490,119 @@
             statusDiv.innerHTML = `<span style="color: var(--warn)">Mostrando datos cacheados (${ageText} atrás). Actualizando en background...</span>`;
         }
 
+        function compareAndNotify(oldDeals, newDeals) {
+            // Build maps by appId for easy comparison
+            const oldMap = new Map(oldDeals.map(d => [String(d.appId), d]));
+            const newMap = new Map(newDeals.map(d => [String(d.appId), d]));
+
+            const newInSale = [];    // In new, not in old
+            const goneFromSale = []; // In old, not in new
+            const cheaper = [];      // In both, discount improved
+            const pricier = [];     // In both, discount worsened
+
+            for (const [id, deal] of newMap) {
+                if (!oldMap.has(id)) {
+                    newInSale.push(deal);
+                } else {
+                    const oldDeal = oldMap.get(id);
+                    if (deal.discount > oldDeal.discount) {
+                        cheaper.push({ deal, oldDiscount: oldDeal.discount });
+                    } else if (deal.discount < oldDeal.discount) {
+                        pricier.push({ deal, oldDiscount: oldDeal.discount });
+                    }
+                }
+            }
+            for (const [id, deal] of oldMap) {
+                if (!newMap.has(id)) {
+                    goneFromSale.push(deal);
+                }
+            }
+
+            // If nothing changed, return
+            if (!newInSale.length && !goneFromSale.length && !cheaper.length && !pricier.length) {
+                return;
+            }
+
+            // Remove any previous notification summary
+            const existing = document.getElementById('notif-summary');
+            if (existing) existing.remove();
+
+            const container = document.createElement('div');
+            container.className = 'notif-summary';
+            container.id = 'notif-summary';
+
+            const items = [];
+
+            if (newInSale.length) {
+                const names = newInSale.map(d => d.name).join(', ');
+                items.push({
+                    cls: 'notif-new',
+                    icon: '&#9650;',
+                    text: `${newInSale.length} juego${newInSale.length > 1 ? 's' : ''} nuevo${newInSale.length > 1 ? 's' : ''} en oferta`,
+                    detail: names
+                });
+            }
+            if (cheaper.length) {
+                const names = cheaper.map(c => `${c.deal.name} (${c.oldDiscount}% → ${c.deal.discount}%)`).join(', ');
+                items.push({
+                    cls: 'notif-cheaper',
+                    icon: '&#8595;',
+                    text: `${cheaper.length} juego${cheaper.length > 1 ? 's' : ''} baj${cheaper.length === 1 ? 'ó' : 'aron'} de precio`,
+                    detail: names
+                });
+            }
+            if (pricier.length) {
+                const names = pricier.map(c => `${c.deal.name} (${c.oldDiscount}% → ${c.deal.discount}%)`).join(', ');
+                items.push({
+                    cls: 'notif-pricier',
+                    icon: '&#8593;',
+                    text: `${pricier.length} juego${pricier.length > 1 ? 's' : ''} subi${pricier.length === 1 ? 'ó' : 'eron'} de precio`,
+                    detail: names
+                });
+            }
+            if (goneFromSale.length) {
+                const names = goneFromSale.map(d => d.name).join(', ');
+                items.push({
+                    cls: 'notif-gone',
+                    icon: '&#10005;',
+                    text: `${goneFromSale.length} juego${goneFromSale.length > 1 ? 's' : ''} salier${goneFromSale.length === 1 ? 'ó' : 'on'} de oferta`,
+                    detail: names
+                });
+            }
+
+            items.forEach(item => {
+                const el = document.createElement('div');
+                el.className = `notif-item ${item.cls}`;
+                el.innerHTML = `
+                    <span class="notif-icon">${item.icon}</span>
+                    <div class="notif-text">
+                        <div>${item.text}</div>
+                        ${item.detail.length < 200 ? `<div class="notif-games">${item.detail}</div>` : `<div class="notif-games">${item.detail.slice(0, 197)}...</div>`}
+                    </div>
+                    <button class="notif-dismiss" title="Descartar">&times;</button>
+                `;
+                el.querySelector('.notif-dismiss').addEventListener('click', () => {
+                    el.style.opacity = '0';
+                    setTimeout(() => {
+                        el.remove();
+                        // If no items left, remove container
+                        if (!container.querySelector('.notif-item')) container.remove();
+                    }, 400);
+                });
+                container.appendChild(el);
+            });
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.insertBefore(container, resultsDiv.firstChild);
+
+            // Auto-dismiss after 20 seconds
+            setTimeout(() => {
+                container.style.transition = 'opacity 0.5s';
+                container.style.opacity = '0';
+                setTimeout(() => container.remove(), 500);
+            }, 20000);
+        }
+
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
@@ -1413,6 +1625,7 @@
             // ── Fase 1.2: Show cached results instantly ──
             const cachedDeals = getDealsCache();
             const hasCache = isCacheFresh(cachedDeals) && cachedDeals.steamId === steamId && cachedDeals.country === cc;
+            const prevDeals = hasCache ? [...cachedDeals.deals] : null; // Save for comparison
             if (hasCache) {
                 showCachedResults(cachedDeals);
             } else {
@@ -1574,6 +1787,11 @@
                 }
 
                 setDealsCache(allDeals);
+
+                // ── Notifications: compare cache vs fresh ──
+                if (prevDeals && prevDeals.length > 0) {
+                    compareAndNotify(prevDeals, allDeals);
+                }
 
                 if (allDeals.length > 0) {
                     statusDiv.innerText = `Búsqueda completada. ${allDeals.length} juegos en oferta.`;
