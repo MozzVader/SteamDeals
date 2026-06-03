@@ -1162,7 +1162,7 @@
         </a>
 
         <div class="config-row">
-            <input type="text" id="steamIdInput" placeholder="Tu Steam64 ID">
+            <input type="text" id="steamIdInput" placeholder="Vanity ID o Steam64 ID">
             <input type="text" id="apiKeyInput" placeholder="API Key (opcional)">
             <input type="text" id="countryInput" class="small-input" value="ar" title="Código de país (ej: ar, us, es)">
             <button onclick="startTracking()">Buscar Ofertas</button>
@@ -2223,6 +2223,95 @@
             }
 
             try {
+                // ══════════════════════════════════════════════════════════════
+                // TRY 0: SCRAPE — extrae appids del HTML de la wishlist pública
+                // No necesita API key. Funciona con vanity ID o Steam64 ID.
+                // Si fue bloqueado esta sesión, lo saltamos directamente.
+                // ══════════════════════════════════════════════════════════════
+                let scrapedAppIds = null;
+                const scrapeBlockedKey = 'scrape_blocked';
+                const wasScrapeBlocked = sessionStorage.getItem(scrapeBlockedKey) === 'true';
+
+                if (!wasScrapeBlocked) {
+                    try {
+                        statusDiv.innerText = 'Obteniendo wishlist (scraping HTML)...';
+                        const scrapeUrl = `${WORKER_URL}?mode=scrape&profile=${encodeURIComponent(steamId)}`;
+                        const scrapeRes = await fetch(scrapeUrl);
+                        const scrapeData = await scrapeRes.json();
+
+                        if (Array.isArray(scrapeData) && scrapeData.length > 0) {
+                            scrapedAppIds = scrapeData;
+                            console.log(`✅ Scrape exitoso: ${scrapedAppIds.length} appids`);
+                        } else if (scrapeData && scrapeData.blocked) {
+                            sessionStorage.setItem(scrapeBlockedKey, 'true');
+                            console.warn(`⚠️ Scrape bloqueado (${scrapeData.error}). Usando siguiente método.`);
+                        }
+                    } catch (scrapeErr) {
+                        console.warn('⚠️ Scrape falló:', scrapeErr.message);
+                    }
+                } else {
+                    console.log('⏭️ Scrape bloqueado esta sesión, saltando.');
+                }
+
+                // Si scrape tuvo éxito → enrich con appdetails + CheapShark + Reviews
+                if (scrapedAppIds && scrapedAppIds.length > 0) {
+                    statusDiv.innerText = `${scrapedAppIds.length} juegos en wishlist (scrape). Buscando ofertas en ${cc.toUpperCase()}...`;
+
+                    const lotes = chunkArray(scrapedAppIds, 8);
+                    const freshDeals = [];
+                    const failedAppIdsPerBatch = [];
+
+                    for (let i = 0; i < lotes.length; i++) {
+                        const porcentaje = Math.round(((i + 1) / lotes.length) * 100);
+                        progressBar.style.width = porcentaje + '%';
+                        progressBar.innerText = porcentaje + '%';
+                        statusDiv.innerText = `Analizando lote ${i + 1} de ${lotes.length} (scrape)...`;
+
+                        try {
+                            const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lotes[i].join(',')}&cc=${cc}`;
+                            const dealsRes = await fetch(dealsUrl);
+                            if (dealsRes.ok) {
+                                const data = await dealsRes.json();
+                                freshDeals.push(...(data.deals || []));
+                                failedAppIdsPerBatch.push(...(data.failedAppIds || []));
+                            }
+                        } catch (batchErr) {
+                            console.error(`Lote ${i + 1} error:`, batchErr);
+                        }
+                        if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
+                    }
+
+                    allDeals = freshDeals;
+                    resultsDiv.innerHTML = '';
+                    if (allDeals.length > 0) {
+                        toolbar.classList.add('visible');
+                        document.getElementById('searchInput').value = '';
+                        document.getElementById('sortSelect').value = 'discount-desc';
+                        document.getElementById('minDiscountInput').value = '0';
+                        document.getElementById('minDiscountValue').textContent = '0';
+                        allDeals.forEach(deal => resultsDiv.appendChild(buildCard(deal)));
+                        updateCount();
+                        updateCartUI();
+                    }
+                    progressContainer.style.display = 'none';
+
+                    if (failedAppIdsPerBatch.length > 0) {
+                        await runRetryCascade(failedAppIdsPerBatch, cc);
+                    }
+
+                    setDealsCache(allDeals);
+                    if (prevDeals && prevDeals.length > 0) {
+                        compareAndNotify(prevDeals, allDeals);
+                    }
+
+                    if (allDeals.length > 0) {
+                        statusDiv.innerText = `Búsqueda completada (scrape). ${allDeals.length} juegos en oferta.`;
+                    } else {
+                        statusDiv.innerText = 'Búsqueda completada (scrape). Ningún juego está en oferta ahora mismo.';
+                    }
+                    return; // ✅ Scrape path completado
+                }
+
                 // ══════════════════════════════════════════════════════════════
                 // TRY wishlistdata via worker (1 request → full wishlist + prices)
                 // Steam bloquea IPs de cloud → 503. Si fue bloqueado esta sesión,

@@ -122,6 +122,67 @@ export default {
       }
     }
 
+    // ── mode=scrape: extrae appids del HTML de la wishlist pública ──
+    // No necesita API key. Funciona para wishlists públicas.
+    // Usa vanity ID (/wishlist/id/{name}/) o Steam64 ID (/wishlist/profiles/{id}/)
+    if (mode === 'scrape') {
+      const profile = url.searchParams.get('profile');
+      if (!profile) return new Response('Faltan datos', { status: 400, headers: CORS });
+
+      let wishlistUrl;
+      if (/^\d+$/.test(profile)) {
+        wishlistUrl = `https://store.steampowered.com/wishlist/profiles/${profile}/`;
+      } else {
+        wishlistUrl = `https://store.steampowered.com/wishlist/id/${profile}/`;
+      }
+
+      try {
+        const res = await fetch(wishlistUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9'
+          }
+        });
+
+        if (!res.ok) {
+          return new Response(JSON.stringify({ error: `HTTP ${res.status}`, blocked: true }), {
+            status: res.status, headers: CORS
+          });
+        }
+
+        const html = await res.text();
+
+        // Parsear g_rgWishlistData: buscar el inicio del objeto, extraer hasta </script>
+        const startMatch = html.match(/g_rgWishlistData\s*=\s*\{/);
+        if (startMatch) {
+          const startIdx = startMatch.index + startMatch[0].length;
+          const scriptEnd = html.indexOf('</script>', startIdx);
+          const chunk = html.substring(startIdx, scriptEnd > 0 ? scriptEnd : startIdx + 500000);
+          // Keys numéricas top-level = appids (formato Steam: 730:{ ... }, 570:{ ... }, ...)
+          const appIds = [...chunk.matchAll(/(\d+)\s*:\s*\{/g)].map(m => m[1]);
+          const unique = [...new Set(appIds)];
+          if (unique.length > 0) {
+            return new Response(JSON.stringify(unique), { headers: CORS });
+          }
+        }
+
+        // Fallback: buscar patrón "appid":numero en todo el HTML
+        const fallbackIds = [...html.matchAll(/"appid"\s*:\s*(\d+)/g)].map(m => m[1]);
+        const uniqueFallback = [...new Set(fallbackIds)];
+        if (uniqueFallback.length > 0) {
+          return new Response(JSON.stringify(uniqueFallback), { headers: CORS });
+        }
+
+        return new Response(JSON.stringify({ error: 'No se encontraron appids en la wishlist', blocked: true }), {
+          status: 404, headers: CORS
+        });
+
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
+      }
+    }
+
     // ── mode=wishlistdata: obtiene TODA la wishlist con precios en 1 request ──
     // Usa el endpoint público de Steam Store (igual que Augmented Steam).
     // NOTA: Steam puede bloquear requests desde IPs de cloud (302 redirect).
