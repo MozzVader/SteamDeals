@@ -146,7 +146,15 @@ export default {
         });
 
         if (!res.ok) {
-          return new Response(JSON.stringify({ error: `HTTP ${res.status}`, blocked: true }), {
+          // 429 = rate limit temporal (recuperable con retry)
+          // Otros errores = bloqueo permanente
+          const is429 = res.status === 429;
+          return new Response(JSON.stringify({
+            error: `HTTP ${res.status}`,
+            blocked: true,
+            rate_limited: is429,
+            retry_after: is429 ? 5 : null
+          }), {
             status: res.status, headers: CORS
           });
         }

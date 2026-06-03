@@ -2242,7 +2242,27 @@
                         if (Array.isArray(scrapeData) && scrapeData.length > 0) {
                             scrapedAppIds = scrapeData;
                             console.log(`✅ Scrape exitoso: ${scrapedAppIds.length} appids`);
+                        } else if (scrapeData && scrapeData.rate_limited) {
+                            // 429 = rate limit temporal → reintentar una vez después de N segundos
+                            const retrySec = scrapeData.retry_after || 5;
+                            console.warn(`⚠️ Scrape rate-limited (429). Reintentando en ${retrySec}s...`);
+                            statusDiv.innerText = `Scrape rate-limited. Reintentando en ${retrySec}s...`;
+                            await new Promise(r => setTimeout(r, retrySec * 1000));
+                            try {
+                                statusDiv.innerText = 'Reintentando scrape...';
+                                const retryRes = await fetch(scrapeUrl);
+                                const retryData = await retryRes.json();
+                                if (Array.isArray(retryData) && retryData.length > 0) {
+                                    scrapedAppIds = retryData;
+                                    console.log(`✅ Scrape retry exitoso: ${scrapedAppIds.length} appids`);
+                                } else {
+                                    console.warn(`⚠️ Scrape retry también falló. Usando siguiente método.`);
+                                }
+                            } catch (retryErr) {
+                                console.warn('⚠️ Scrape retry error:', retryErr.message);
+                            }
                         } else if (scrapeData && scrapeData.blocked) {
+                            // Bloqueo permanente (403, 404, etc.) → marcar para no reintentar
                             sessionStorage.setItem(scrapeBlockedKey, 'true');
                             console.warn(`⚠️ Scrape bloqueado (${scrapeData.error}). Usando siguiente método.`);
                         }
