@@ -39,7 +39,7 @@ export default {
 
     // action=login → redirige a Steam
     if (action === 'login') {
-      const returnTo = encodeURIComponent(`${REALM}/?action=callback`);
+      const returnTo = `${REALM}/?action=callback`;
       const loginUrl = `${STEAM_OPENID}?` + new URLSearchParams({
         'openid.ns': 'http://specs.openid.net/auth/2.0',
         'openid.mode': 'checkid_setup',
