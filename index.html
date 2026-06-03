@@ -1659,6 +1659,12 @@
 
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
+                // Clear cached results before fresh fetch to avoid duplicates
+                if (hasCache) {
+                    resultsDiv.innerHTML = '';
+                    allDeals = [];
+                }
+
                 const lotes = chunkArray(appIds, 8);
                 let toolbarShown = false;
                 const failedAppIdsPerBatch = [];
