@@ -122,6 +122,50 @@ export default {
       }
     }
 
+    // ── mode=wishlistdata: obtiene TODA la wishlist con precios en 1 request ──
+    // Usa el endpoint público de Steam Store (igual que Augmented Steam).
+    // Devuelve todos los juegos con nombre, precio, descuento, etc.
+    // No requiere API key — solo Steam64 ID.
+    if (mode === 'wishlistdata') {
+      const steamId = url.searchParams.get('steamid');
+      const cc = url.searchParams.get('cc') || 'us';
+      if (!steamId) return new Response('Faltan steamid', { status: 400, headers: CORS });
+
+      try {
+        const wlUrl = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/`;
+        const headers = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Cookie': `cc=${cc}; l=english`
+        };
+        const wlRes = await fetch(wlUrl, { headers });
+
+        if (!wlRes.ok) {
+          return new Response(JSON.stringify({ error: `Steam respondió con ${wlRes.status}` }), { status: 502, headers: CORS });
+        }
+
+        const wlRaw = await wlRes.json();
+
+        // Transformar a array con campos relevantes
+        const games = [];
+        for (const [appId, info] of Object.entries(wlRaw)) {
+          games.push({
+            appId,
+            name: info.name || '',
+            discount_percent: info.discount_percent || 0,
+            original_price: info.original_price || 0,
+            final_price: info.final_price || 0,
+            currency: info.currency || 'USD'
+          });
+        }
+
+        return new Response(JSON.stringify({ totalGames: games.length, games }), { headers: CORS });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
+      }
+    }
+
     // ── Process a single game: find deal price + CheapShark + Reviews ──
     async function processGame(appId, cc, ctx, dbg) {
       const gameDbg = debug ? { appId, calls: [] } : null;

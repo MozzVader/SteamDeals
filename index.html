@@ -1064,7 +1064,7 @@
 
         <div class="config-row">
             <input type="text" id="steamIdInput" placeholder="Tu Steam64 ID">
-            <input type="text" id="apiKeyInput" placeholder="Tu Steam Web API Key">
+            <input type="text" id="apiKeyInput" placeholder="API Key (opcional)">
             <input type="text" id="countryInput" class="small-input" value="ar" title="Código de país (ej: ar, us, es)">
             <button onclick="startTracking()">Buscar Ofertas</button>
         </div>
@@ -1614,6 +1614,106 @@
             }, 20000);
         }
 
+        // ── Retry Cascade (extracted for reuse) ──
+        // Reintenta juegos que fallaron por rate limit con delays crecientes.
+        // Agrega deals recuperados progresivamente al DOM y allDeals.
+        // Devuelve: { recoveredDeals, stillFailed }
+        async function runRetryCascade(failedAppIds, cc) {
+            let stillFailed = failedAppIds;
+            let totalRetryDeals = 0;
+            const resultsDiv = document.getElementById('results');
+            const retryRounds = [
+                { waitSec: 10, batchSize: 2, delayMs: 2000 },
+                { waitSec: 15, batchSize: 1, delayMs: 3000 },
+                { waitSec: 20, batchSize: 1, delayMs: 5000 }
+            ];
+
+            for (let round = 0; round < retryRounds.length && stillFailed.length > 0; round++) {
+                const config = retryRounds[round];
+                const roundNum = round + 1;
+                const totalRounds = retryRounds.length;
+
+                let retryBanner = document.getElementById('retry-banner');
+                if (!retryBanner) {
+                    retryBanner = document.createElement('div');
+                    retryBanner.className = 'retry-banner';
+                    retryBanner.id = 'retry-banner';
+                    resultsDiv.insertBefore(retryBanner, resultsDiv.firstChild);
+                }
+                retryBanner.className = 'retry-banner';
+                retryBanner.innerHTML = `
+                    <span class="retry-icon">⟳</span>
+                    <span class="retry-text">Ronda ${roundNum}/${totalRounds}: Reintentando ${stillFailed.length} juegos${round > 0 ? ' que siguen fallando' : ' por rate limit'}...</span>
+                    <span class="retry-counter" id="retry-counter">Esperando ${config.waitSec}s...</span>
+                `;
+
+                const retryCounter = document.getElementById('retry-counter');
+                for (let w = config.waitSec; w > 0; w--) {
+                    retryCounter.innerText = `Esperando ${w}s...`;
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                retryCounter.innerText = `0/${stillFailed.length}`;
+
+                const retryBatches = chunkArray(stillFailed, config.batchSize);
+                let roundDealsCount = 0;
+                const nextFailed = [];
+
+                for (let i = 0; i < retryBatches.length; i++) {
+                    const processed = Math.min((i + 1) * config.batchSize, stillFailed.length);
+                    retryCounter.innerText = `${processed}/${stillFailed.length}`;
+                    try {
+                        const retryUrl = `${WORKER_URL}?mode=retry&appids=${retryBatches[i].join(',')}&cc=${cc}`;
+                        const retryRes = await fetch(retryUrl);
+                        if (retryRes.ok) {
+                            const retryData = await retryRes.json();
+                            const retryDeals = retryData.deals || [];
+                            const batchFailed = retryData.failedAppIds || [];
+                            nextFailed.push(...batchFailed);
+                            if (retryDeals.length > 0) {
+                                roundDealsCount += retryDeals.length;
+                                totalRetryDeals += retryDeals.length;
+                                retryDeals.forEach(deal => {
+                                    allDeals.push(deal);
+                                    const card = buildCard(deal);
+                                    card.style.animation = 'fadeSlideIn 0.5s ease both';
+                                    resultsDiv.appendChild(card);
+                                });
+                                updateCount();
+                                updateCartUI();
+                            }
+                        }
+                    } catch(e) {
+                        console.error(`Retry round ${roundNum} error:`, e);
+                    }
+                    if (i < retryBatches.length - 1) await new Promise(r => setTimeout(r, config.delayMs));
+                }
+
+                stillFailed = nextFailed;
+
+                if (stillFailed.length > 0 && round < retryRounds.length - 1) {
+                    retryBanner.querySelector('.retry-counter').innerText = `${stillFailed.length} siguen fallando`;
+                    retryBanner.querySelector('.retry-text').innerText = `Ronda ${roundNum}: +${roundDealsCount} deals. Quedan ${stillFailed.length} por reintentar...`;
+                } else {
+                    retryBanner.className = 'retry-banner retry-done';
+                    retryBanner.querySelector('.retry-icon').innerText = '✓';
+                    if (totalRetryDeals > 0) {
+                        retryBanner.querySelector('.retry-text').innerText = `Retry completado (${roundNum} ronda${roundNum > 1 ? 's' : ''}). +${totalRetryDeals} deals recuperados.`;
+                    } else {
+                        retryBanner.querySelector('.retry-text').innerText = `Retry completado (${roundNum} ronda${roundNum > 1 ? 's' : ''}). No se encontraron deals adicionales.`;
+                    }
+                    retryBanner.querySelector('.retry-counter').innerText = stillFailed.length > 0 ? `${stillFailed.length} sin precio regional` : '';
+                    setTimeout(() => {
+                        retryBanner.style.transition = 'opacity 0.5s';
+                        retryBanner.style.opacity = '0';
+                        setTimeout(() => retryBanner.remove(), 500);
+                    }, 8000);
+                }
+            }
+
+            return { totalRetryDeals, stillFailed };
+        }
+
         async function startTracking() {
             const steamId = document.getElementById('steamIdInput').value;
             const apiKey = document.getElementById('apiKeyInput').value;
@@ -1624,19 +1724,19 @@
             const progressContainer = document.getElementById('progress-container');
             const toolbar = document.getElementById('toolbar');
 
-            if (!steamId || !apiKey) {
-                statusDiv.innerText = "⚠️ Ingresá tu Steam ID y tu API Key para continuar.";
+            if (!steamId) {
+                statusDiv.innerText = "⚠️ Ingresá tu Steam ID para continuar.";
                 return;
             }
 
             localStorage.setItem('steamId', steamId);
-            localStorage.setItem('steamApiKey', apiKey);
+            if (apiKey) localStorage.setItem('steamApiKey', apiKey);
             localStorage.setItem('steamCountry', cc);
 
-            // ── Fase 1.2: Show cached results instantly ──
+            // ── Cache ──
             const cachedDeals = getDealsCache();
             const hasCache = isCacheFresh(cachedDeals) && cachedDeals.steamId === steamId && cachedDeals.country === cc;
-            const prevDeals = hasCache ? [...cachedDeals.deals] : null; // Save for comparison
+            const prevDeals = hasCache ? [...cachedDeals.deals] : null;
             if (hasCache) {
                 showCachedResults(cachedDeals);
             } else {
@@ -1649,12 +1749,163 @@
             progressBar.style.width = '0%';
             progressBar.innerText = '0%';
             if (!hasCache) {
-                statusDiv.innerText = 'Obteniendo tu wishlist...';
+                statusDiv.innerText = 'Obteniendo datos de wishlist...';
             } else {
                 statusDiv.innerHTML = `<span style="color: var(--warn)">Mostrando datos cacheados. Actualizando en background...</span>`;
             }
 
             try {
+                // ══════════════════════════════════════════════════════════════
+                // FAST PATH: Wishlistdata (1 request → toda la wishlist)
+                // Igual que Augmented Steam: obtiene todos los juegos con
+                // precios y descuentos en una sola llamada a Steam.
+                // ══════════════════════════════════════════════════════════════
+                const wlDataUrl = `${WORKER_URL}?mode=wishlistdata&steamid=${steamId}&cc=${cc}`;
+                const wlDataRes = await fetch(wlDataUrl);
+                let fastPath = false;
+
+                if (wlDataRes.ok) {
+                    const wlData = await wlDataRes.json();
+                    if (wlData.games && Array.isArray(wlData.games) && wlData.games.length > 0) {
+                        fastPath = true;
+                        const totalGames = wlData.totalGames || wlData.games.length;
+
+                        // Filtrar juegos en oferta
+                        const discountedGames = wlData.games.filter(g => g.discount_percent > 0);
+                        const discountedAppIds = discountedGames.map(g => g.appId);
+
+                        // Mapa rápido para lookup por appId
+                        const wlMap = {};
+                        wlData.games.forEach(g => wlMap[g.appId] = g);
+
+                        statusDiv.innerText = `${totalGames} juegos en wishlist. ${discountedAppIds.length} en oferta.`;
+                        progressBar.style.width = '15%';
+                        progressBar.innerText = '15%';
+
+                        if (discountedAppIds.length === 0) {
+                            // No hay ofertas — respuesta definitiva, no se necesita buscar más
+                            allDeals = [];
+                            resultsDiv.innerHTML = '';
+                            progressContainer.style.display = 'none';
+                            toolbar.classList.remove('visible');
+                            setDealsCache([]);
+                            if (prevDeals && prevDeals.length > 0) compareAndNotify(prevDeals, []);
+                            statusDiv.innerText = `${totalGames} juegos en wishlist. Ninguno está en oferta.`;
+                            return;
+                        }
+
+                        // ── Enriquecer: appdetails (precio regional ARS) + CheapShark + Reviews ──
+                        // Solo procesamos los juegos que están en oferta (~80 vs 360 antes)
+                        const lots = chunkArray(discountedAppIds, 8);
+                        const freshDeals = [];
+                        const failedAppIdsPerBatch = [];
+
+                        statusDiv.innerText = `Obteniendo detalles para ${discountedAppIds.length} juegos en oferta...`;
+
+                        for (let i = 0; i < lots.length; i++) {
+                            const pct = 15 + Math.round(((i + 1) / lots.length) * 70);
+                            progressBar.style.width = pct + '%';
+                            progressBar.innerText = pct + '%';
+                            statusDiv.innerText = `Enriqueciendo lote ${i + 1} de ${lots.length} (${discountedAppIds.length} en oferta)...`;
+
+                            try {
+                                const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lots[i].join(',')}&cc=${cc}`;
+                                const dealsRes = await fetch(dealsUrl);
+                                if (dealsRes.ok) {
+                                    const data = await dealsRes.json();
+                                    freshDeals.push(...(data.deals || []));
+                                    failedAppIdsPerBatch.push(...(data.failedAppIds || []));
+                                }
+                            } catch (batchErr) {
+                                console.error(`Lote ${i + 1} error:`, batchErr);
+                            }
+                            if (i < lots.length - 1) await new Promise(r => setTimeout(r, 500));
+                        }
+
+                        // Mapa de deals enriquecidos
+                        const enrichedMap = new Map(freshDeals.map(d => [String(d.appId), d]));
+
+                        // ── Swap: reemplazar cache con resultados enriquecidos ──
+                        allDeals = freshDeals;
+                        resultsDiv.innerHTML = '';
+                        if (allDeals.length > 0) {
+                            toolbar.classList.add('visible');
+                            document.getElementById('searchInput').value = '';
+                            document.getElementById('sortSelect').value = 'discount-desc';
+                            document.getElementById('minDiscountInput').value = '0';
+                            document.getElementById('minDiscountValue').textContent = '0';
+                            allDeals.forEach(deal => resultsDiv.appendChild(buildCard(deal)));
+                            updateCount();
+                            updateCartUI();
+                        }
+                        progressBar.style.width = '90%';
+                        progressBar.innerText = '90%';
+                        progressContainer.style.display = 'none';
+
+                        // ── Retry cascade (solo juegos que fallaron el enriquecimiento) ──
+                        const retryTargets = failedAppIdsPerBatch.filter(id => !enrichedMap.has(String(id)));
+                        if (retryTargets.length > 0) {
+                            const { totalRetryDeals, stillFailed } = await runRetryCascade(retryTargets, cc);
+                            // Agregar deals recuperados al enrichedMap
+                            allDeals.forEach(d => enrichedMap.set(String(d.appId), d));
+                        }
+
+                        // ── Fallback: cards básicos para juegos que no se pudieron enriquecer ──
+                        // Usamos datos del wishlistdata (nombre + descuento + precio USD)
+                        let fallbackCount = 0;
+                        for (const appId of discountedAppIds) {
+                            if (!enrichedMap.has(String(appId))) {
+                                const info = wlMap[appId];
+                                if (info) {
+                                    const fallbackDeal = {
+                                        appId: appId,
+                                        name: info.name || 'Desconocido',
+                                        steamPrice: (info.final_price / 100).toFixed(2),
+                                        originalPrice: (info.original_price / 100).toFixed(2),
+                                        discount: info.discount_percent,
+                                        currency: info.currency || 'USD',
+                                        lowestEverUsd: null,
+                                        maxDiscountUs: null,
+                                        reviewScore: null,
+                                        reviewLabel: ''
+                                    };
+                                    allDeals.push(fallbackDeal);
+                                    enrichedMap.set(String(appId), fallbackDeal);
+                                    const card = buildCard(fallbackDeal);
+                                    resultsDiv.appendChild(card);
+                                    fallbackCount++;
+                                }
+                            }
+                        }
+                        if (fallbackCount > 0) {
+                            updateCount();
+                            updateCartUI();
+                        }
+
+                        // ── Guardar cache + notificar cambios ──
+                        setDealsCache(allDeals);
+                        if (prevDeals && prevDeals.length > 0) {
+                            compareAndNotify(prevDeals, allDeals);
+                        }
+
+                        statusDiv.innerText = `${discountedAppIds.length} juegos en oferta.${fallbackCount > 0 ? ` (${fallbackCount} sin precio regional)` : ''}`;
+                        return; // ✅ Fast path completado
+                    }
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // FALLBACK: Approach anterior (Wishlist API + per-game deals)
+                // Se usa si wishlistdata falla o devuelve datos vacíos.
+                // ══════════════════════════════════════════════════════════════
+                if (!apiKey) {
+                    statusDiv.innerText = "⚠️ Ingresá tu API Key para usar el método alternativo.";
+                    progressContainer.style.display = 'none';
+                    return;
+                }
+
+                console.log('Wishlistdata falló o vacío, usando fallback con Wishlist API...');
+                statusDiv.innerText = 'Obteniendo tu wishlist (método alternativo)...';
+
                 const wishlistUrl = `${WORKER_URL}?mode=wishlist&steamid=${steamId}&apikey=${apiKey}`;
                 const wishlistRes = await fetch(wishlistUrl);
 
@@ -1671,18 +1922,17 @@
                 statusDiv.innerText = `Se encontraron ${appIds.length} juegos. Buscando ofertas en ${cc.toUpperCase()}...`;
 
                 const lotes = chunkArray(appIds, 8);
-                const freshDeals = []; // Accumulate silently, swap at end
+                const freshDeals = [];
                 const failedAppIdsPerBatch = [];
 
                 for (let i = 0; i < lotes.length; i++) {
-                    const lote = lotes[i];
                     const porcentaje = Math.round(((i + 1) / lotes.length) * 100);
                     progressBar.style.width = porcentaje + '%';
                     progressBar.innerText = porcentaje + '%';
                     statusDiv.innerText = `Analizando lote ${i + 1} de ${lotes.length}...`;
 
                     try {
-                        const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lote.join(',')}&cc=${cc}`;
+                        const dealsUrl = `${WORKER_URL}?mode=deals&appids=${lotes[i].join(',')}&cc=${cc}`;
                         const dealsRes = await fetch(dealsUrl);
 
                         if (dealsRes.ok) {
@@ -1699,7 +1949,6 @@
                     if (i < lotes.length - 1) await new Promise(r => setTimeout(r, 500));
                 }
 
-                // ── Swap: replace cached cards with fresh results at once ──
                 allDeals = freshDeals;
                 resultsDiv.innerHTML = '';
                 if (allDeals.length > 0) {
@@ -1714,111 +1963,12 @@
                 }
                 progressContainer.style.display = 'none';
 
-                // ── Retry cascade: up to 3 rounds with increasing delays ──
-                let stillFailed = failedAppIdsPerBatch;
-                let totalRetryDeals = 0;
-                const retryRounds = [
-                    { waitSec: 10, batchSize: 2, delayMs: 2000 },
-                    { waitSec: 15, batchSize: 1, delayMs: 3000 },
-                    { waitSec: 20, batchSize: 1, delayMs: 5000 }
-                ];
-
-                for (let round = 0; round < retryRounds.length && stillFailed.length > 0; round++) {
-                    const config = retryRounds[round];
-                    const roundNum = round + 1;
-                    const totalRounds = retryRounds.length;
-
-                    // Show/update retry banner
-                    let retryBanner = document.getElementById('retry-banner');
-                    if (!retryBanner) {
-                        retryBanner = document.createElement('div');
-                        retryBanner.className = 'retry-banner';
-                        retryBanner.id = 'retry-banner';
-                        resultsDiv.insertBefore(retryBanner, resultsDiv.firstChild);
-                    }
-                    retryBanner.className = 'retry-banner';
-                    retryBanner.innerHTML = `
-                        <span class="retry-icon">⟳</span>
-                        <span class="retry-text">Ronda ${roundNum}/${totalRounds}: Reintentando ${stillFailed.length} juegos${round > 0 ? ' que siguen fallando' : ' por rate limit'}...</span>
-                        <span class="retry-counter" id="retry-counter">Esperando ${config.waitSec}s...</span>
-                    `;
-
-                    // Wait for Steam token bucket to recover
-                    const retryCounter = document.getElementById('retry-counter');
-                    for (let w = config.waitSec; w > 0; w--) {
-                        retryCounter.innerText = `Esperando ${w}s...`;
-                        await new Promise(r => setTimeout(r, 1000));
-                    }
-
-                    retryCounter.innerText = `0/${stillFailed.length}`;
-
-                    // Retry in batches
-                    const retryBatches = chunkArray(stillFailed, config.batchSize);
-                    let roundDealsCount = 0;
-                    const nextFailed = [];
-
-                    for (let i = 0; i < retryBatches.length; i++) {
-                        const processed = Math.min((i + 1) * config.batchSize, stillFailed.length);
-                        retryCounter.innerText = `${processed}/${stillFailed.length}`;
-                        try {
-                            const retryUrl = `${WORKER_URL}?mode=retry&appids=${retryBatches[i].join(',')}&cc=${cc}`;
-                            const retryRes = await fetch(retryUrl);
-                            if (retryRes.ok) {
-                                const retryData = await retryRes.json();
-                                const retryDeals = retryData.deals || [];
-                                const batchFailed = retryData.failedAppIds || [];
-                                nextFailed.push(...batchFailed);
-                                if (retryDeals.length > 0) {
-                                    roundDealsCount += retryDeals.length;
-                                    totalRetryDeals += retryDeals.length;
-                                    retryDeals.forEach(deal => {
-                                        allDeals.push(deal);
-                                        const card = buildCard(deal);
-                                        card.style.animation = 'fadeSlideIn 0.5s ease both';
-                                        resultsDiv.appendChild(card);
-                                    });
-                                    updateCount();
-                                    updateCartUI();
-                                }
-                            }
-                        } catch(e) {
-                            console.error(`Retry round ${roundNum} error:`, e);
-                        }
-                        if (i < retryBatches.length - 1) await new Promise(r => setTimeout(r, config.delayMs));
-                    }
-
-                    stillFailed = nextFailed;
-
-                    // Update banner for this round
-                    if (stillFailed.length > 0 && round < retryRounds.length - 1) {
-                        retryBanner.querySelector('.retry-counter').innerText = `${stillFailed.length} siguen fallando`;
-                        retryBanner.querySelector('.retry-text').innerText = `Ronda ${roundNum}: +${roundDealsCount} deals. Quedan ${stillFailed.length} por reintentar...`;
-                    } else {
-                        // Final state
-                        retryBanner.className = 'retry-banner retry-done';
-                        retryBanner.querySelector('.retry-icon').innerText = '✓';
-                        if (totalRetryDeals > 0) {
-                            retryBanner.querySelector('.retry-text').innerText = `Retry completado (${roundNum} ronda${roundNum > 1 ? 's' : ''}). +${totalRetryDeals} deals recuperados.`;
-                        } else {
-                            retryBanner.querySelector('.retry-text').innerText = `Retry completado (${roundNum} ronda${roundNum > 1 ? 's' : ''}). No se encontraron deals adicionales.`;
-                        }
-                        if (stillFailed.length > 0) {
-                            retryBanner.querySelector('.retry-counter').innerText = `${stillFailed.length} sin poder verificar`;
-                        } else {
-                            retryBanner.querySelector('.retry-counter').innerText = '';
-                        }
-                        // Auto-hide after 8 seconds
-                        setTimeout(() => {
-                            retryBanner.style.transition = 'opacity 0.5s';
-                            retryBanner.style.opacity = '0';
-                            setTimeout(() => retryBanner.remove(), 500);
-                        }, 8000);
-                    }
+                if (failedAppIdsPerBatch.length > 0) {
+                    await runRetryCascade(failedAppIdsPerBatch, cc);
                 }
 
                 setDealsCache(allDeals);
 
-                // ── Notifications: compare cache vs fresh ──
                 if (prevDeals && prevDeals.length > 0) {
                     compareAndNotify(prevDeals, allDeals);
                 }
